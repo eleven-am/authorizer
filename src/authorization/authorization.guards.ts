@@ -1,31 +1,12 @@
-import { Context, CanActivate as CanActivateSocket } from '@eleven-am/pondsocket-nest';
-import { CanActivate, ExecutionContext, Injectable, Logger } from '@nestjs/common';
+import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 
-import { mapTaskEither } from './authorization.constants';
 import { AuthorizationService } from './authorization.service';
 
 @Injectable()
-export class AuthorizationHttpGuard implements CanActivate {
-    private readonly logger = new Logger(AuthorizationHttpGuard.name);
+export class AuthorizationGuard implements CanActivate {
+    constructor (private readonly authorizationService: AuthorizationService) {}
 
-    constructor (protected readonly authorizationService: AuthorizationService) {}
-
-    canActivate (context: ExecutionContext) {
-        const task = this.authorizationService.checkAction(context);
-
-        return mapTaskEither(task, this.logger);
-    }
-}
-
-@Injectable()
-export class AuthorizationSocketGuard implements CanActivateSocket {
-    private readonly logger = new Logger(AuthorizationSocketGuard.name);
-
-    constructor (protected readonly authorizationService: AuthorizationService) {}
-
-    canActivate (context: Context) {
-        const task = this.authorizationService.checkAction(context);
-
-        return mapTaskEither(task, this.logger);
+    canActivate (context: ExecutionContext): Promise<boolean> {
+        return this.authorizationService.authorize(context);
     }
 }

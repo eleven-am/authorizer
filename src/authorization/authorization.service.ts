@@ -1,108 +1,92 @@
-import { AbilityBuilder, ForbiddenError } from '@casl/ability';
-import { createPrismaAbility } from '@casl/prisma';
-import { TaskEither, createUnauthorizedError } from '@eleven-am/fp';
-import { Context } from '@eleven-am/pondsocket-nest';
-import { DiscoveryService } from '@golevelup/nestjs-discovery';
-import { Injectable, OnModuleInit, ExecutionContext, ForbiddenException, Inject } from '@nestjs/common';
+import { ForbiddenError } from '@casl/ability';
+import {
+    Injectable,
+    OnModuleInit,
+    ExecutionContext,
+    ForbiddenException,
+    UnauthorizedException,
+    Inject,
+} from '@nestjs/common';
+import { DiscoveryService, Reflector } from '@nestjs/core';
 
-import { Authenticator } from '../types';
 import { AUTHORIZER_KEY, CAN_PERFORM_KEY, ABILITY_KEY, AUTHENTICATION_BACKEND } from './authorization.constants';
-import { AuthorizationContext } from './authorization.context';
-import { WillAuthorize, User, Permission, AppAbilityType } from './authorization.contracts';
-import { AuthorizationReflector } from './authorization.reflector';
+import { WillAuthorize, Permission, Authenticator, ResolvedAbility, ResolvedUser } from './authorization.contracts';
 
 @Injectable()
 export class AuthorizationService implements OnModuleInit {
     private authorizers: WillAuthorize[] = [];
 
     constructor (
-        private readonly discoverService: DiscoveryService,
-        private readonly reflector: AuthorizationReflector,
+        private readonly discoveryService: DiscoveryService,
+        private readonly reflector: Reflector,
         @Inject(AUTHENTICATION_BACKEND) private readonly authenticator: Authenticator,
     ) {}
 
-    async onModuleInit () {
-        const classes = await this.discoverService.providersWithMetaAtKey(AUTHORIZER_KEY);
+    onModuleInit () {
+        const providers = this.discoveryService.getProviders();
 
-        this.authorizers = classes.map((provider) => provider.discoveredClass.instance as WillAuthorize);
+        this.authorizers = providers
+            .filter(({ metatype }) => metatype && this.reflector.get(AUTHORIZER_KEY, metatype))
+            .filter(({ instance }) => instance)
+            .map(({ instance }) => instance as WillAuthorize);
     }
 
-    checkAction (ctx: ExecutionContext | Context) {
-        const context = new AuthorizationContext(ctx);
-        const rules = this.getRules(context);
+    async authorize (context: ExecutionContext): Promise<boolean> {
+        const permissions = this.getPermissions(context);
+        const user = await this.authenticator.retrieveUser(context);
 
-        const action = (user: User) => TaskEither.of(user)
-            .map((user) => this.defineAbilityFor(user, rules))
-            .chain(({ ability, authorizers }) => TaskEither
-                .of(authorizers)
-                .chainItems((item) => item.authorize(context, ability, rules))
-                .ioSync(() => context.addData(ABILITY_KEY, ability)))
-            .filterItems((item) => !item)
-            .filter(
-                (items) => !items.length,
-                () => createUnauthorizedError('User is not authorized to access this resource'),
-            )
-            .map(() => true);
+        if (user) {
+            const ability = await this.buildAbility(user);
 
-        return this.authenticator
-            .retrieveUser(context).orNull()
-            .matchTask([
-                {
-                    predicate: (user) => Boolean(user),
-                    run: action,
-                },
-                {
-                    predicate: () => rules.length === 0,
-                    run: () => this.authenticator.allowNoRulesAccess(context),
-                },
-            ])
-            .mapError(() => createUnauthorizedError('User is not authenticated'));
-    }
+            this.checkPermissions(ability, permissions);
+            this.storeAbility(context, ability);
 
-    private getRules (context: AuthorizationContext) {
-        return this.reflector.getAllAndMerge<Permission[]>(
-            CAN_PERFORM_KEY,
-            [
-                context.getHandler(),
-                context.getClass(),
-            ],
-        );
-    }
-
-    private defineAbilityFor (user: User, rules: Permission[]) {
-        const { can, cannot, build } = new AbilityBuilder<AppAbilityType>(
-            createPrismaAbility,
-        );
-
-        try {
-            const authorizers = this.authorizers;
-
-            authorizers.forEach((authorizer) => {
-                authorizer.forUser(user, {
-                    can,
-                    cannot,
-                });
-            });
-
-            const ability = build();
-
-            rules.forEach((rule) => {
-                ForbiddenError.from(ability)
-                    .throwUnlessCan(
-                        rule.action,
-                        rule.resource,
-                        rule.field,
-                    );
-            });
-
-            const filteredAuthorizers = authorizers.filter((authorizer): authorizer is Required<WillAuthorize> => 'authorize' in authorizer);
-
-            return {
-                ability,
-                authorizers: filteredAuthorizers,
-            };
-        } catch (e) {
-            throw new ForbiddenException(e.message);
+            return true;
         }
+
+        if (permissions.length > 0) {
+            throw new UnauthorizedException('Authentication required');
+        }
+
+        return true;
+    }
+
+    private getPermissions (context: ExecutionContext): Permission[] {
+        const classPermissions = this.reflector.get<Permission[]>(CAN_PERFORM_KEY, context.getClass()) ?? [];
+        const handlerPermissions = this.reflector.get<Permission[]>(CAN_PERFORM_KEY, context.getHandler()) ?? [];
+
+        return [...classPermissions, ...handlerPermissions];
+    }
+
+    private async buildAbility (user: ResolvedUser): Promise<ResolvedAbility> {
+        const builder = this.authenticator.abilityFactory();
+
+        for (const authorizer of this.authorizers) {
+            await authorizer.forUser(user, builder);
+        }
+
+        return builder.build() as ResolvedAbility;
+    }
+
+    private checkPermissions (ability: ResolvedAbility, permissions: Permission[]): void {
+        for (const permission of permissions) {
+            try {
+                ForbiddenError.from(ability).throwUnlessCan(
+                    permission.action,
+                    permission.subject,
+                    permission.field,
+                );
+            } catch (error) {
+                throw new ForbiddenException(
+                    error instanceof Error ? error.message : 'Forbidden',
+                );
+            }
+        }
+    }
+
+    private storeAbility (context: ExecutionContext, ability: ResolvedAbility): void {
+        const request = context.switchToHttp().getRequest();
+
+        request[ABILITY_KEY] = ability;
     }
 }

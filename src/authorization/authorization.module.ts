@@ -1,31 +1,39 @@
-import { DiscoveryModule } from '@golevelup/nestjs-discovery';
 import { DynamicModule, Provider } from '@nestjs/common';
+import { DiscoveryModule } from '@nestjs/core';
 
-import { AuthorizationMetadata } from '../types';
 import { AUTHENTICATION_BACKEND } from './authorization.constants';
-import { AuthorizationReflector } from './authorization.reflector';
+import { Authenticator, AuthorizationAsyncModuleOptions } from './authorization.contracts';
 import { AuthorizationService } from './authorization.service';
 
 export class AuthorizationModule {
-    static forRootAsync ({
-        providers,
-        imports,
-        exports,
-        inject,
-        useFactory,
-    }: AuthorizationMetadata): DynamicModule {
+    static forRoot (authenticator: Authenticator): DynamicModule {
         const provider: Provider = {
             provide: AUTHENTICATION_BACKEND,
-            inject,
-            useFactory,
+            useValue: authenticator,
         };
 
         return {
             global: true,
             module: AuthorizationModule,
-            imports: [DiscoveryModule, ...(imports || [])],
-            exports: [AuthorizationService, ...(exports || [])],
-            providers: [provider, AuthorizationReflector, AuthorizationService, ...(providers || [])],
+            imports: [DiscoveryModule],
+            exports: [AuthorizationService],
+            providers: [provider, AuthorizationService],
+        };
+    }
+
+    static forRootAsync (options: AuthorizationAsyncModuleOptions): DynamicModule {
+        const provider: Provider = {
+            provide: AUTHENTICATION_BACKEND,
+            inject: options.inject,
+            useFactory: options.useFactory,
+        };
+
+        return {
+            global: true,
+            module: AuthorizationModule,
+            imports: [DiscoveryModule, ...(options.imports || [])],
+            exports: [AuthorizationService],
+            providers: [provider, AuthorizationService],
         };
     }
 }
