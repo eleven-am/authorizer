@@ -13,6 +13,7 @@ Peer dependencies:
 - `@casl/ability` ^6.0.0
 - `@nestjs/common` ^11.0.0
 - `@nestjs/core` ^11.0.0
+- `@eleven-am/pondsocket-nest` ^0.0.134 (optional, for PondSocket support)
 
 ## Setup
 
@@ -79,10 +80,12 @@ The `Authenticator` interface has two methods:
 
 ```typescript
 interface Authenticator {
-    retrieveUser(context: ExecutionContext): Promise<ResolvedUser | null>;
+    retrieveUser(context: AuthorizableContext): Promise<ResolvedUser | null>;
     abilityFactory(): AbilityBuilder<ResolvedAbility>;
 }
 ```
+
+`AuthorizableContext` is a structural type satisfied by both NestJS `ExecutionContext` and PondSocket `Context`.
 
 - `retrieveUser` — extract the current user from the request context. Return `null` for unauthenticated requests.
 - `abilityFactory` — return a fresh `AbilityBuilder` that authorizers will populate with rules.
@@ -179,6 +182,56 @@ findOne(@Param('id') id: string, @CurrentAbility() ability: MongoAbility) {
 }
 ```
 
+## PondSocket
+
+The library supports `@eleven-am/pondsocket-nest` via a separate entry point. Install `@eleven-am/pondsocket-nest` as a dependency, then import from `@eleven-am/authorizer/pondsocket`.
+
+### Guard
+
+Register `AuthorizationSocketGuard` with your PondSocket module:
+
+```typescript
+import { AuthorizationSocketGuard } from '@eleven-am/authorizer/pondsocket';
+
+PondSocketModule.forRoot({
+    guards: [AuthorizationSocketGuard],
+    providers: [AuthorizationSocketGuard],
+})
+```
+
+The guard delegates to the same `AuthorizationService` used by HTTP. `@CanPerform()` and `@Authorizer()` work identically — PondSocket's `Context` provides the same `getClass()` and `getHandler()` methods the reflector needs.
+
+### Accessing the Ability
+
+Use `@CurrentSocketAbility()` in place of `@CurrentAbility()`:
+
+```typescript
+import { CurrentSocketAbility } from '@eleven-am/authorizer/pondsocket';
+import { CanPerform } from '@eleven-am/authorizer';
+import { MongoAbility } from '@casl/ability';
+
+@OnEvent('find-all')
+@CanPerform({ action: 'read', subject: 'Post' })
+findAll(@CurrentSocketAbility() ability: MongoAbility) {}
+```
+
+### Authenticator
+
+Your `Authenticator.retrieveUser` receives an `AuthorizableContext`. For an implementation that handles both HTTP and PondSocket contexts:
+
+```typescript
+const authenticator: Authenticator = {
+    retrieveUser: async (context) => {
+        if ('switchToHttp' in context) {
+            return (context as any).switchToHttp().getRequest().user ?? null;
+        }
+
+        return (context as any).getData('user') ?? null;
+    },
+    abilityFactory: () => new AbilityBuilder(createMongoAbility),
+};
+```
+
 ## API Reference
 
 ### Module
@@ -195,10 +248,16 @@ findOne(@Param('id') id: string, @CurrentAbility() ability: MongoAbility) {
 - `Authorizer()` — class decorator, marks a provider as an authorizer
 - `CanPerform(...permissions: Permission[])` — class or method decorator
 - `CurrentAbility()` — parameter decorator, injects the CASL ability from the request
+- `CurrentSocketAbility()` — parameter decorator for PondSocket handlers (from `@eleven-am/authorizer/pondsocket`)
+
+### PondSocket Guard
+
+- `AuthorizationSocketGuard` — implements PondSocket's `CanActivate`, delegates to `AuthorizationService` (from `@eleven-am/authorizer/pondsocket`)
 
 ### Interfaces
 
 - `Authenticator` — `retrieveUser(context)` and `abilityFactory()`
+- `AuthorizableContext` — `{ getClass(), getHandler() }`, satisfied by both `ExecutionContext` and PondSocket `Context`
 - `WillAuthorize` — `forUser(user, builder)`
 - `Permission` — `{ action, subject, field? }`
 - `Register` — augment to type `user` and `ability`
