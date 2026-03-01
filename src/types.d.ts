@@ -8,6 +8,11 @@ export type ResolvedUser = Register extends { user: infer T } ? T : unknown;
 
 export type ResolvedAbility = Register extends { ability: infer T } ? T : AnyAbility;
 
+export interface AuthorizableContext {
+    getClass(): any;
+    getHandler(): any;
+}
+
 export interface Permission {
     action: string;
     subject: string;
@@ -19,7 +24,7 @@ export interface WillAuthorize {
 }
 
 export interface Authenticator {
-    retrieveUser(context: ExecutionContext): Promise<ResolvedUser | null>;
+    retrieveUser(context: AuthorizableContext): Promise<ResolvedUser | null>;
     abilityFactory(): AbilityBuilder<ResolvedAbility>;
 }
 
@@ -28,6 +33,8 @@ export interface AuthorizationAsyncModuleOptions {
     inject?: any[];
     useFactory: (...args: any[]) => Promise<Authenticator> | Authenticator;
 }
+
+export declare const ABILITY_CONTEXT_KEY: string;
 
 export declare function CanPerform (...permissions: Permission[]): ClassDecorator & MethodDecorator;
 
@@ -42,7 +49,7 @@ export declare class AuthorizationModule {
 }
 
 export declare class AuthorizationService {
-    authorize (context: ExecutionContext): Promise<boolean>;
+    authorize (context: AuthorizableContext): Promise<boolean>;
 }
 
 export declare class AuthorizationGuard implements CanActivate {

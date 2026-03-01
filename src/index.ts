@@ -6,8 +6,10 @@ export {
     Register,
     ResolvedUser,
     ResolvedAbility,
+    AuthorizableContext,
     Permission,
     WillAuthorize,
     Authenticator,
     AuthorizationAsyncModuleOptions,
 } from './authorization/authorization.contracts';
+export { ABILITY_CONTEXT_KEY } from './authorization/authorization.constants';

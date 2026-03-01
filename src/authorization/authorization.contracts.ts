@@ -1,5 +1,4 @@
 import { AnyAbility, AbilityBuilder } from '@casl/ability';
-import { ExecutionContext } from '@nestjs/common';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
 export interface Register {}
@@ -7,6 +6,11 @@ export interface Register {}
 export type ResolvedUser = Register extends { user: infer T } ? T : unknown;
 
 export type ResolvedAbility = Register extends { ability: infer T } ? T : AnyAbility;
+
+export interface AuthorizableContext {
+    getClass(): any;
+    getHandler(): any;
+}
 
 export interface Permission {
     action: string;
@@ -19,7 +23,7 @@ export interface WillAuthorize {
 }
 
 export interface Authenticator {
-    retrieveUser(context: ExecutionContext): Promise<ResolvedUser | null>;
+    retrieveUser(context: AuthorizableContext): Promise<ResolvedUser | null>;
     abilityFactory(): AbilityBuilder<ResolvedAbility>;
 }
 
