@@ -1,15 +1,10 @@
 import 'reflect-metadata';
 import { AbilityBuilder, createMongoAbility } from '@casl/ability';
 
-import { ABILITY_CONTEXT_KEY, ABILITY_KEY } from './authorization/authorization.constants';
+import { ABILITY_CONTEXT_KEY, USER_CONTEXT_KEY } from './authorization/authorization.constants';
 import { AuthorizationContext } from './authorization/authorization.context';
 import { AuthorizationService } from './authorization/authorization.service';
-
-jest.mock('@eleven-am/pondsocket-nest', () => ({
-    createParamDecorator: (cb: any) => cb,
-}));
-
-import { AuthorizationSocketGuard, CurrentSocketAbility } from './pondsocket';
+import { AuthorizationSocketGuard } from './pondsocket';
 
 describe('AuthorizationSocketGuard', () => {
     let guard: AuthorizationSocketGuard;
@@ -37,29 +32,6 @@ describe('AuthorizationSocketGuard', () => {
         mockService.authorize.mockRejectedValue(error);
 
         await expect(guard.canActivate({} as any)).rejects.toThrow('forbidden');
-    });
-});
-
-describe('CurrentSocketAbility', () => {
-    it('returns ability from context.getData', () => {
-        const mockAbility = { can: jest.fn() };
-        const mockContext = {
-            getData: jest.fn().mockReturnValue(mockAbility),
-        };
-
-        const result = (CurrentSocketAbility as any)(undefined, mockContext);
-
-        expect(result).toBe(mockAbility);
-        expect(mockContext.getData).toHaveBeenCalledWith(ABILITY_CONTEXT_KEY);
-    });
-
-    it('throws Error if ability is missing', () => {
-        const mockContext = {
-            getData: jest.fn().mockReturnValue(null),
-        };
-
-        expect(() => (CurrentSocketAbility as any)(undefined, mockContext))
-            .toThrow('No ability found on context. Ensure AuthorizationSocketGuard is applied.');
     });
 });
 
@@ -107,6 +79,22 @@ describe('AuthorizationService with PondSocket context', () => {
         );
     });
 
+    it('stores user via addData for PondSocket context', async () => {
+        const user = { id: 1, name: 'test' };
+        const mockContext = {
+            getClass: jest.fn().mockReturnValue(class {}),
+            getHandler: jest.fn().mockReturnValue(() => {}),
+            addData: jest.fn(),
+            getData: jest.fn(),
+        };
+
+        mockAuthenticator.retrieveUser.mockResolvedValue(user);
+
+        await service.authorize(mockContext as any);
+
+        expect(mockContext.addData).toHaveBeenCalledWith(USER_CONTEXT_KEY, user);
+    });
+
     it('passes AuthorizationContext to retrieveUser', async () => {
         const mockContext = {
             getClass: jest.fn().mockReturnValue(class {}),
@@ -125,8 +113,8 @@ describe('AuthorizationService with PondSocket context', () => {
         expect(receivedArg.isSocket).toBe(true);
     });
 
-    it('stores ability via switchToHttp for HTTP context', async () => {
-        const mockRequest: Record<string | symbol, any> = {};
+    it('stores ability via request for HTTP context', async () => {
+        const mockRequest: Record<string, any> = {};
         const mockContext = {
             getClass: jest.fn().mockReturnValue(class {}),
             getHandler: jest.fn().mockReturnValue(() => {}),
@@ -139,6 +127,6 @@ describe('AuthorizationService with PondSocket context', () => {
 
         await service.authorize(mockContext as any);
 
-        expect(mockRequest[ABILITY_KEY]).toBeDefined();
+        expect(mockRequest[ABILITY_CONTEXT_KEY]).toBeDefined();
     });
 });

@@ -17,6 +17,7 @@ export interface Permission {
 
 export interface WillAuthorize {
     forUser(user: ResolvedUser, builder: AbilityBuilder<ResolvedAbility>): void | Promise<void>;
+    authorize?(context: AuthorizationContext, ability: ResolvedAbility, permissions: Permission[]): boolean | Promise<boolean>;
 }
 
 export interface Authenticator {

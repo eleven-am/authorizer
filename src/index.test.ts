@@ -8,6 +8,8 @@ import {
     Authorizer,
     CanPerform,
     CurrentAbility,
+    CurrentUser,
+    createParamDecorator,
 } from './index';
 
 describe('Public API exports', () => {
@@ -18,6 +20,10 @@ describe('Public API exports', () => {
         expect(AuthorizationContext).toBeDefined();
         expect(Authorizer).toBeInstanceOf(Function);
         expect(CanPerform).toBeInstanceOf(Function);
-        expect(CurrentAbility).toBeInstanceOf(Function);
+        expect(createParamDecorator).toBeInstanceOf(Function);
+        expect(CurrentAbility).toHaveProperty('HTTP');
+        expect(CurrentAbility).toHaveProperty('WS');
+        expect(CurrentUser).toHaveProperty('HTTP');
+        expect(CurrentUser).toHaveProperty('WS');
     });
 });

@@ -23,6 +23,10 @@ export declare class AuthorizationContext {
     getClass (): any;
 
     getHandler (): any;
+
+    addData<T> (key: string, data: T): void;
+
+    getData<T> (key: string): T | null;
 }
 
 export interface Permission {
@@ -33,6 +37,7 @@ export interface Permission {
 
 export interface WillAuthorize {
     forUser(user: ResolvedUser, builder: AbilityBuilder<ResolvedAbility>): void | Promise<void>;
+    authorize?(context: AuthorizationContext, ability: ResolvedAbility, permissions: Permission[]): boolean | Promise<boolean>;
 }
 
 export interface Authenticator {
@@ -46,13 +51,26 @@ export interface AuthorizationAsyncModuleOptions {
     useFactory: (...args: any[]) => Promise<Authenticator> | Authenticator;
 }
 
-export declare const ABILITY_CONTEXT_KEY: string;
+export type ContextMapper<T> = (context: AuthorizationContext) => T;
+
+export declare function createParamDecorator<T> (mapper: ContextMapper<T>): {
+    WS: () => ParameterDecorator;
+    HTTP: () => ParameterDecorator;
+};
 
 export declare function CanPerform (...permissions: Permission[]): ClassDecorator & MethodDecorator;
 
 export declare function Authorizer (): ClassDecorator;
 
-export declare const CurrentAbility: (...args: any[]) => ParameterDecorator;
+export declare const CurrentAbility: {
+    WS: () => ParameterDecorator;
+    HTTP: () => ParameterDecorator;
+};
+
+export declare const CurrentUser: {
+    WS: () => ParameterDecorator;
+    HTTP: () => ParameterDecorator;
+};
 
 export declare class AuthorizationModule {
     static forRoot (authenticator: Authenticator): DynamicModule;

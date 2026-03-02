@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AbilityBuilder, createMongoAbility } from '@casl/ability';
 
-import { ABILITY_KEY, AUTHORIZER_KEY, CAN_PERFORM_KEY } from './authorization.constants';
+import { ABILITY_CONTEXT_KEY, USER_CONTEXT_KEY, AUTHORIZER_KEY, CAN_PERFORM_KEY } from './authorization.constants';
 import { AuthorizationService } from './authorization.service';
 
 describe('AuthorizationService', () => {
@@ -10,7 +10,7 @@ describe('AuthorizationService', () => {
     let mockDiscovery: { getProviders: jest.Mock };
     let mockReflector: { get: jest.Mock };
     let mockAuthenticator: { retrieveUser: jest.Mock; abilityFactory: jest.Mock };
-    let mockRequest: Record<string | symbol, any>;
+    let mockRequest: Record<string, any>;
     let mockContext: {
         getClass: jest.Mock;
         getHandler: jest.Mock;
@@ -243,7 +243,7 @@ describe('AuthorizationService', () => {
             expect(authorizer2.forUser).toHaveBeenCalled();
         });
 
-        it('stores ability on request via ABILITY_KEY', async () => {
+        it('stores ability on request via ABILITY_CONTEXT_KEY', async () => {
             const authorizer = createAuthorizer((builder) => {
                 builder.can('read', 'Post');
             });
@@ -254,8 +254,20 @@ describe('AuthorizationService', () => {
 
             await service.authorize(mockContext as any);
 
-            expect(mockRequest[ABILITY_KEY]).toBeDefined();
-            expect(mockRequest[ABILITY_KEY].can('read', 'Post')).toBe(true);
+            expect(mockRequest[ABILITY_CONTEXT_KEY]).toBeDefined();
+            expect(mockRequest[ABILITY_CONTEXT_KEY].can('read', 'Post')).toBe(true);
+        });
+
+        it('stores user on request via USER_CONTEXT_KEY', async () => {
+            const user = { id: 1, name: 'test' };
+
+            service.onModuleInit();
+            setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockResolvedValue(user);
+
+            await service.authorize(mockContext as any);
+
+            expect(mockRequest[USER_CONTEXT_KEY]).toBe(user);
         });
 
         it('handles permissions with field property', async () => {
@@ -298,6 +310,58 @@ describe('AuthorizationService', () => {
             const result = await service.authorize(mockContext as any);
 
             expect(result).toBe(true);
+        });
+
+        it('calls authorize hook on authorizers that implement it', async () => {
+            const authorizer = {
+                forUser: jest.fn(),
+                authorize: jest.fn().mockResolvedValue(true),
+            };
+
+            setupAuthorizers([authorizer]);
+            setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+            expect(authorizer.authorize).toHaveBeenCalledWith(
+                expect.anything(),
+                expect.anything(),
+                expect.any(Array),
+            );
+        });
+
+        it('throws ForbiddenException when authorize hook returns false', async () => {
+            const authorizer = {
+                forUser: jest.fn(),
+                authorize: jest.fn().mockResolvedValue(false),
+            };
+
+            setupAuthorizers([authorizer]);
+            setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            await expect(service.authorize(mockContext as any)).rejects.toThrow(
+                ForbiddenException,
+            );
+        });
+
+        it('skips authorizers without authorize hook', async () => {
+            const withHook = {
+                forUser: jest.fn(),
+                authorize: jest.fn().mockResolvedValue(true),
+            };
+            const withoutHook = createAuthorizer();
+
+            setupAuthorizers([withoutHook, withHook]);
+            setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+            expect(withHook.authorize).toHaveBeenCalled();
         });
 
         it('throws ForbiddenException with error message from CASL', async () => {

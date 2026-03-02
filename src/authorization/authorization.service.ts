@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { DiscoveryService, Reflector } from '@nestjs/core';
 
-import { AUTHORIZER_KEY, CAN_PERFORM_KEY, ABILITY_KEY, ABILITY_CONTEXT_KEY, AUTHENTICATION_BACKEND } from './authorization.constants';
+import { AUTHORIZER_KEY, CAN_PERFORM_KEY, ABILITY_CONTEXT_KEY, USER_CONTEXT_KEY, AUTHENTICATION_BACKEND } from './authorization.constants';
 import { AuthorizationContext } from './authorization.context';
 import { WillAuthorize, Permission, Authenticator, ResolvedAbility, ResolvedUser } from './authorization.contracts';
 
@@ -40,7 +40,9 @@ export class AuthorizationService implements OnModuleInit {
             const ability = await this.buildAbility(user);
 
             this.checkPermissions(ability, permissions);
-            this.storeAbility(authContext, ability);
+            await this.runAuthorizeHooks(authContext, ability, permissions);
+            authContext.addData(USER_CONTEXT_KEY, user);
+            authContext.addData(ABILITY_CONTEXT_KEY, ability);
 
             return true;
         }
@@ -69,6 +71,18 @@ export class AuthorizationService implements OnModuleInit {
         return builder.build() as ResolvedAbility;
     }
 
+    private async runAuthorizeHooks (context: AuthorizationContext, ability: ResolvedAbility, permissions: Permission[]): Promise<void> {
+        for (const authorizer of this.authorizers) {
+            if (authorizer.authorize) {
+                const allowed = await authorizer.authorize(context, ability, permissions);
+
+                if (!allowed) {
+                    throw new ForbiddenException('Authorization denied by authorizer');
+                }
+            }
+        }
+    }
+
     private checkPermissions (ability: ResolvedAbility, permissions: Permission[]): void {
         for (const permission of permissions) {
             try {
@@ -82,16 +96,6 @@ export class AuthorizationService implements OnModuleInit {
                     error instanceof Error ? error.message : 'Forbidden',
                 );
             }
-        }
-    }
-
-    private storeAbility (context: AuthorizationContext, ability: ResolvedAbility): void {
-        if (context.isHttp) {
-            const request = context.getHttpContext().switchToHttp().getRequest();
-
-            request[ABILITY_KEY] = ability;
-        } else {
-            context.getSocketContext().addData(ABILITY_CONTEXT_KEY, ability);
         }
     }
 }

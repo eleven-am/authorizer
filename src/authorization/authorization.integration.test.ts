@@ -3,7 +3,7 @@ import { ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AbilityBuilder, createMongoAbility } from '@casl/ability';
 
-import { ABILITY_KEY } from './authorization.constants';
+import { ABILITY_CONTEXT_KEY } from './authorization.constants';
 import { WillAuthorize } from './authorization.contracts';
 import { Authorizer, CanPerform } from './authorization.decorators';
 import { AuthorizationService } from './authorization.service';
@@ -91,7 +91,7 @@ describe('Authorization Integration', () => {
 
         await service.authorize(ctx);
 
-        const ability = mockRequest[ABILITY_KEY];
+        const ability = mockRequest[ABILITY_CONTEXT_KEY];
 
         expect(ability.can('read', 'Post')).toBe(true);
         expect(ability.can('create', 'Comment')).toBe(true);
@@ -140,7 +140,7 @@ describe('Authorization Integration', () => {
 
         await service.authorize(ctx);
 
-        const ability = mockRequest[ABILITY_KEY];
+        const ability = mockRequest[ABILITY_CONTEXT_KEY];
 
         expect(ability).toBeDefined();
         expect(ability.can('read', 'Post')).toBe(true);
