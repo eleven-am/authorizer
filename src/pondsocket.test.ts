@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { AbilityBuilder, createMongoAbility } from '@casl/ability';
 
 import { ABILITY_CONTEXT_KEY, ABILITY_KEY } from './authorization/authorization.constants';
+import { AuthorizationContext } from './authorization/authorization.context';
 import { AuthorizationService } from './authorization/authorization.service';
 
 jest.mock('@eleven-am/pondsocket-nest', () => ({
@@ -104,6 +105,24 @@ describe('AuthorizationService with PondSocket context', () => {
             ABILITY_CONTEXT_KEY,
             expect.anything(),
         );
+    });
+
+    it('passes AuthorizationContext to retrieveUser', async () => {
+        const mockContext = {
+            getClass: jest.fn().mockReturnValue(class {}),
+            getHandler: jest.fn().mockReturnValue(() => {}),
+            addData: jest.fn(),
+            getData: jest.fn(),
+        };
+
+        mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+        await service.authorize(mockContext as any);
+
+        const receivedArg = mockAuthenticator.retrieveUser.mock.calls[0][0];
+
+        expect(receivedArg).toBeInstanceOf(AuthorizationContext);
+        expect(receivedArg.isSocket).toBe(true);
     });
 
     it('stores ability via switchToHttp for HTTP context', async () => {

@@ -9,7 +9,8 @@ import {
 import { DiscoveryService, Reflector } from '@nestjs/core';
 
 import { AUTHORIZER_KEY, CAN_PERFORM_KEY, ABILITY_KEY, ABILITY_CONTEXT_KEY, AUTHENTICATION_BACKEND } from './authorization.constants';
-import { WillAuthorize, Permission, Authenticator, AuthorizableContext, ResolvedAbility, ResolvedUser } from './authorization.contracts';
+import { AuthorizationContext } from './authorization.context';
+import { WillAuthorize, Permission, Authenticator, ResolvedAbility, ResolvedUser } from './authorization.contracts';
 
 @Injectable()
 export class AuthorizationService implements OnModuleInit {
@@ -30,15 +31,16 @@ export class AuthorizationService implements OnModuleInit {
             .map(({ instance }) => instance as WillAuthorize);
     }
 
-    async authorize (context: AuthorizableContext): Promise<boolean> {
-        const permissions = this.getPermissions(context);
-        const user = await this.authenticator.retrieveUser(context);
+    async authorize (context: { getClass(): any; getHandler(): any }): Promise<boolean> {
+        const authContext = new AuthorizationContext(context as any);
+        const permissions = this.getPermissions(authContext);
+        const user = await this.authenticator.retrieveUser(authContext);
 
         if (user) {
             const ability = await this.buildAbility(user);
 
             this.checkPermissions(ability, permissions);
-            this.storeAbility(context, ability);
+            this.storeAbility(authContext, ability);
 
             return true;
         }
@@ -50,7 +52,7 @@ export class AuthorizationService implements OnModuleInit {
         return true;
     }
 
-    private getPermissions (context: AuthorizableContext): Permission[] {
+    private getPermissions (context: AuthorizationContext): Permission[] {
         const classPermissions = this.reflector.get<Permission[]>(CAN_PERFORM_KEY, context.getClass()) ?? [];
         const handlerPermissions = this.reflector.get<Permission[]>(CAN_PERFORM_KEY, context.getHandler()) ?? [];
 
@@ -83,13 +85,13 @@ export class AuthorizationService implements OnModuleInit {
         }
     }
 
-    private storeAbility (context: AuthorizableContext, ability: ResolvedAbility): void {
-        if ('switchToHttp' in context) {
-            const request = (context as any).switchToHttp().getRequest();
+    private storeAbility (context: AuthorizationContext, ability: ResolvedAbility): void {
+        if (context.isHttp) {
+            const request = context.getHttpContext().switchToHttp().getRequest();
 
             request[ABILITY_KEY] = ability;
-        } else if ('addData' in context) {
-            (context as any).addData(ABILITY_CONTEXT_KEY, ability);
+        } else {
+            context.getSocketContext().addData(ABILITY_CONTEXT_KEY, ability);
         }
     }
 }

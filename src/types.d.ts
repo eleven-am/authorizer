@@ -1,4 +1,5 @@
 import { AnyAbility, AbilityBuilder } from '@casl/ability';
+import { Context } from '@eleven-am/pondsocket-nest';
 import { ExecutionContext, DynamicModule, CanActivate } from '@nestjs/common';
 
 // eslint-disable-next-line @typescript-eslint/no-empty-object-type
@@ -8,9 +9,20 @@ export type ResolvedUser = Register extends { user: infer T } ? T : unknown;
 
 export type ResolvedAbility = Register extends { ability: infer T } ? T : AnyAbility;
 
-export interface AuthorizableContext {
-    getClass(): any;
-    getHandler(): any;
+export declare class AuthorizationContext {
+    constructor (context: ExecutionContext | Context);
+
+    get isSocket (): boolean;
+
+    get isHttp (): boolean;
+
+    getHttpContext (): ExecutionContext;
+
+    getSocketContext (): Context;
+
+    getClass (): any;
+
+    getHandler (): any;
 }
 
 export interface Permission {
@@ -24,7 +36,7 @@ export interface WillAuthorize {
 }
 
 export interface Authenticator {
-    retrieveUser(context: AuthorizableContext): Promise<ResolvedUser | null>;
+    retrieveUser(context: AuthorizationContext): Promise<ResolvedUser | null>;
     abilityFactory(): AbilityBuilder<ResolvedAbility>;
 }
 
@@ -49,7 +61,7 @@ export declare class AuthorizationModule {
 }
 
 export declare class AuthorizationService {
-    authorize (context: AuthorizableContext): Promise<boolean>;
+    authorize (context: ExecutionContext | Context): Promise<boolean>;
 }
 
 export declare class AuthorizationGuard implements CanActivate {

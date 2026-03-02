@@ -4,6 +4,7 @@ import {
     AuthorizationModule,
     AuthorizationService,
     AuthorizationGuard,
+    AuthorizationContext,
     Authorizer,
     CanPerform,
     CurrentAbility,
@@ -14,6 +15,7 @@ describe('Public API exports', () => {
         expect(AuthorizationModule).toBeDefined();
         expect(AuthorizationService).toBeDefined();
         expect(AuthorizationGuard).toBeDefined();
+        expect(AuthorizationContext).toBeDefined();
         expect(Authorizer).toBeInstanceOf(Function);
         expect(CanPerform).toBeInstanceOf(Function);
         expect(CurrentAbility).toBeInstanceOf(Function);
