@@ -27,7 +27,7 @@ A blog API with role-based access control, custom authorization, and PondSocket 
 ### Type registration
 
 ```typescript
-import { MongoAbility } from '@casl/ability';
+import { PrismaAbility } from '@casl/prisma';
 
 interface User {
     id: number;
@@ -35,10 +35,15 @@ interface User {
     email: string;
 }
 
+type Action = 'read' | 'create' | 'update' | 'delete' | 'manage';
+type Subject = 'Post' | 'Comment';
+
+type AppAbility = PrismaAbility<[Action, Subject]>;
+
 declare module '@eleven-am/authorizer' {
     interface Register {
         user: User;
-        ability: MongoAbility;
+        ability: AppAbility;
     }
 }
 ```
@@ -49,7 +54,8 @@ declare module '@eleven-am/authorizer' {
 import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { AuthorizationModule, AuthorizationGuard, Authenticator } from '@eleven-am/authorizer';
-import { AbilityBuilder, createMongoAbility } from '@casl/ability';
+import { AbilityBuilder } from '@casl/ability';
+import { createPrismaAbility } from '@casl/prisma';
 
 @Module({
     imports: [
@@ -66,7 +72,7 @@ import { AbilityBuilder, createMongoAbility } from '@casl/ability';
 
                     return request ? userService.fromToken(request.headers.authorization) : null;
                 },
-                abilityFactory: () => new AbilityBuilder(createMongoAbility),
+                abilityFactory: () => new AbilityBuilder<AppAbility>(createPrismaAbility),
             }),
         }),
     ],
@@ -83,13 +89,13 @@ export class AppModule {}
 
 ```typescript
 import { Authorizer, WillAuthorize, AuthorizationContext, Permission } from '@eleven-am/authorizer';
-import { AbilityBuilder, MongoAbility } from '@casl/ability';
+import { AbilityBuilder } from '@casl/ability';
 
 @Authorizer()
 class PostAuthorizer implements WillAuthorize {
     constructor(private readonly postService: PostService) {}
 
-    forUser(user: User, builder: AbilityBuilder<MongoAbility>) {
+    forUser(user: User, builder: AbilityBuilder<AppAbility>) {
         builder.can('read', 'Post');
 
         if (user.role === 'admin') {
@@ -101,7 +107,7 @@ class PostAuthorizer implements WillAuthorize {
         }
     }
 
-    async authorize(context: AuthorizationContext, ability: MongoAbility, permissions: Permission[]) {
+    async authorize(context: AuthorizationContext, ability: AppAbility, permissions: Permission[]) {
         if (context.isHttp) {
             const request = context.getHttpContext().switchToHttp().getRequest();
             const postId = request.params?.id;
@@ -121,7 +127,6 @@ class PostAuthorizer implements WillAuthorize {
 ```typescript
 import { Controller, Get, Post, Patch, Delete, Param, Body } from '@nestjs/common';
 import { CanPerform, CurrentAbility, CurrentUser } from '@eleven-am/authorizer';
-import { MongoAbility } from '@casl/ability';
 
 @Controller('posts')
 export class PostController {
@@ -138,7 +143,7 @@ export class PostController {
     update(
         @Param('id') id: string,
         @Body() body: UpdatePostDto,
-        @CurrentAbility() ability: MongoAbility,
+        @CurrentAbility() ability: AppAbility,
     ) {
         return this.postService.update(id, body, ability);
     }
@@ -154,14 +159,15 @@ Use `forRoot` with a static `Authenticator`, or `forRootAsync` when you need dep
 ```typescript
 import { Module } from '@nestjs/common';
 import { AuthorizationModule, Authenticator } from '@eleven-am/authorizer';
-import { AbilityBuilder, createMongoAbility } from '@casl/ability';
+import { AbilityBuilder } from '@casl/ability';
+import { createPrismaAbility } from '@casl/prisma';
 
 const authenticator: Authenticator = {
     retrieveUser: async (context) => {
         const request = context.getRequestLike() as { user?: User } | null;
         return request?.user ?? null;
     },
-    abilityFactory: () => new AbilityBuilder(createMongoAbility),
+    abilityFactory: () => new AbilityBuilder<AppAbility>(createPrismaAbility),
 };
 
 @Module({
@@ -242,17 +248,22 @@ registerTransportAdapter(grpcAdapter, { prepend: true });
 By default, the user type is `unknown` and the ability type is `AnyAbility`. To get typed parameters, augment the `Register` interface:
 
 ```typescript
-import { MongoAbility } from '@casl/ability';
+import { PrismaAbility } from '@casl/prisma';
+
+type Action = 'read' | 'create' | 'update' | 'delete' | 'manage';
+type Subject = 'Post' | 'Comment';
+
+type AppAbility = PrismaAbility<[Action, Subject]>;
 
 declare module '@eleven-am/authorizer' {
     interface Register {
         user: { id: number; role: string };
-        ability: MongoAbility;
+        ability: AppAbility;
     }
 }
 ```
 
-After this, `@CurrentAbility()` returns `MongoAbility` and authorizer `forUser` receives your user type.
+After this, `@CurrentAbility()` returns `AppAbility`, authorizer `forUser` receives your user type, and `@CanPerform` actions and subjects are checked at compile time.
 
 ### Choosing the ability flavor
 
@@ -260,10 +271,10 @@ The registered ability, the `abilityFactory`, and the condition syntax in your a
 
 | You use | Register | `abilityFactory` | Rule condition syntax |
 | --- | --- | --- | --- |
-| gate checks only (no `./prisma`) | `MongoAbility` | `createMongoAbility` | MongoDB query language (`{ authorId: { $ne: 1 } }`) |
-| the `./prisma` port | `PrismaAbility` (from `@casl/prisma`) | `createPrismaAbility` | Prisma `WhereInput` (`{ authorId: { not: 1 } }`) |
+| Prisma (the default for this library, required for `./prisma`) | `PrismaAbility` (from `@casl/prisma`) | `createPrismaAbility` | Prisma `WhereInput` (`{ authorId: { not: 1 } }`) |
+| gate checks only, no Prisma anywhere | `MongoAbility` (from `@casl/ability`) | `createMongoAbility` | MongoDB query language (`{ authorId: { $ne: 1 } }`) |
 
-`MongoAbility` refers to MongoDB's query *language* for in-memory condition matching, not the database — it works against any storage for gate checks. But `constrain` copies rule conditions into Prisma `where` clauses verbatim, so Mongo-syntax conditions (`$ne`, `$in`) would reach Prisma unchanged and fail at query time. If any consumer of the ability calls `constrain`, build the whole ability with `createPrismaAbility` and write every condition in Prisma syntax — the `prismaQuery` interpreter evaluates those same conditions in memory for `ability.can(...)` checks, so one flavor serves both.
+Every example in this README uses the Prisma flavor. `MongoAbility` refers to MongoDB's query *language* for in-memory condition matching, not the database — it works against any storage for gate checks, and is only appropriate when nothing in the application will ever call `constrain`. `constrain` copies rule conditions into Prisma `where` clauses verbatim, so Mongo-syntax conditions (`$ne`, `$in`) would reach Prisma unchanged and fail at query time. With `createPrismaAbility`, the `prismaQuery` interpreter evaluates the same Prisma-shaped conditions in memory for `ability.can(...)` checks, so one flavor serves both directions — and `PrismaAbility` types conditions against your generated `Prisma.TypeMap`, making a condition on a nonexistent model field a compile error.
 
 ## Authorizers
 
@@ -271,11 +282,11 @@ An authorizer is a NestJS provider that defines CASL rules for a user. Mark a cl
 
 ```typescript
 import { Authorizer, WillAuthorize } from '@eleven-am/authorizer';
-import { AbilityBuilder, MongoAbility } from '@casl/ability';
+import { AbilityBuilder } from '@casl/ability';
 
 @Authorizer()
 class PostAuthorizer implements WillAuthorize {
-    forUser(user: { id: number; role: string }, builder: AbilityBuilder<MongoAbility>) {
+    forUser(user: { id: number; role: string }, builder: AbilityBuilder<AppAbility>) {
         if (user.role === 'admin') {
             builder.can('manage', 'Post');
         } else {
@@ -386,23 +397,7 @@ AuthorizationModule.forRootAsync({ defaultPolicy: 'public', /* ... */ })
 
 ### Typed permissions
 
-Register your CASL ability with explicit action and subject tuples and `@CanPerform` becomes fully typed:
-
-```typescript
-import { MongoAbility } from '@casl/ability';
-
-type Action = 'read' | 'create' | 'update' | 'delete';
-type Subject = 'Post' | 'Comment';
-
-declare module '@eleven-am/authorizer' {
-    interface Register {
-        user: User;
-        ability: MongoAbility<[Action, Subject]>;
-    }
-}
-```
-
-After this, `@CanPerform({ action: 'raed', subject: 'Post' })` is a compile error. Without the registration, `action` and `subject` accept any string.
+Register your CASL ability with explicit action and subject tuples — as in the [Type Registration](#type-registration) example — and `@CanPerform` becomes fully typed: `@CanPerform({ action: 'raed', subject: 'Post' })` is a compile error. The typing derives from the ability's generics, so it works with any flavor (`PrismaAbility<[Action, Subject]>` and `MongoAbility<[Action, Subject]>` alike). Without the registration, `action` and `subject` accept any string.
 
 ## Accessing the Ability and User
 
@@ -451,37 +446,16 @@ The guard delegates to the same `AuthorizationService` used by HTTP. `@CanPerfor
 
 ## Prisma
 
-The `./prisma` subpath turns CASL rules into Prisma `where` clauses via [`@casl/prisma`](https://casl.js.org/v6/en/package/casl-prisma). Install `@casl/prisma` and `@prisma/client`, build abilities with `createPrismaAbility`, register the `PrismaAbility` type, then provide `PrismaAuthorizationService` in any module:
+The `./prisma` subpath turns CASL rules into Prisma `where` clauses via [`@casl/prisma`](https://casl.js.org/v6/en/package/casl-prisma). Install `@casl/prisma` and `@prisma/client`, register the `PrismaAbility` type and build abilities with `createPrismaAbility` (as shown in [Type Registration](#type-registration)), then provide `PrismaAuthorizationService` in any module:
 
 ```typescript
 import { PrismaAuthorizationService } from '@eleven-am/authorizer/prisma';
-import { PrismaAbility, createPrismaAbility } from '@casl/prisma';
-import { AbilityBuilder } from '@casl/ability';
-
-type Action = 'read' | 'create' | 'update' | 'delete' | 'manage';
-type Subject = 'Post' | 'Comment';
-
-type AppAbility = PrismaAbility<[Action, Subject]>;
-
-declare module '@eleven-am/authorizer' {
-    interface Register {
-        user: { id: number; role: string };
-        ability: AppAbility;
-    }
-}
-
-const authenticator: Authenticator = {
-    retrieveUser: async (context) => /* ... */,
-    abilityFactory: () => new AbilityBuilder<AppAbility>(createPrismaAbility),
-};
 
 @Module({
     providers: [PrismaAuthorizationService],
 })
 export class CrudModule {}
 ```
-
-Rule conditions must be written in Prisma `WhereInput` syntax (`{ authorId: { not: 1 } }`), not MongoDB query syntax — `constrain` copies them into the generated `where` clause as-is. `PrismaAbility` types conditions against your generated `Prisma.TypeMap`, so a condition referencing a nonexistent model field fails to compile.
 
 ```typescript
 @Injectable()
