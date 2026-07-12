@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
     {
-        ignores: ['dist/**', 'node_modules/**', 'coverage/**'],
+        ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'src/**/*.d.ts'],
     },
     eslint.configs.recommended,
     ...tseslint.configs.recommended,
@@ -134,7 +134,7 @@ export default tseslint.config(
             'no-unneeded-ternary': 'error',
             'no-unreachable-loop': 'error',
             'no-unused-expressions': 'warn',
-            'no-unused-vars': 'warn',
+            'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
             'no-useless-call': 'error',
             'no-useless-computed-key': 'error',
             'no-useless-concat': 'error',

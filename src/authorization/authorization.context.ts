@@ -1,28 +1,33 @@
 import type { Context } from '@eleven-am/pondsocket-nest';
 import { ExecutionContext } from '@nestjs/common';
 
+import { TransportContext } from './transport.contracts';
+import { resolveTransport } from './transport.registry';
+
 export class AuthorizationContext {
     readonly #context: ExecutionContext | Context;
 
-    readonly #isSocket: boolean;
-
-    readonly #data: Record<string, unknown> = {};
+    readonly #transport: TransportContext;
 
     constructor (context: ExecutionContext | Context) {
-        this.#isSocket = !('switchToHttp' in context);
         this.#context = context;
+        this.#transport = resolveTransport(context);
+    }
+
+    get type (): string {
+        return this.#transport.type;
     }
 
     get isSocket (): boolean {
-        return this.#isSocket;
+        return this.#transport.type === 'pondsocket';
     }
 
     get isHttp (): boolean {
-        return !this.#isSocket;
+        return this.#transport.type === 'http';
     }
 
     getHttpContext (): ExecutionContext {
-        if (this.#isSocket) {
+        if (!this.isHttp) {
             throw new Error('HTTP context is not available');
         }
 
@@ -30,46 +35,38 @@ export class AuthorizationContext {
     }
 
     getSocketContext (): Context {
-        if (!this.#isSocket) {
+        if (!this.isSocket) {
             throw new Error('Socket context is not available');
         }
 
         return this.#context as Context;
     }
 
+    getGraphQLContext (): ExecutionContext {
+        if (this.#transport.type !== 'graphql') {
+            throw new Error('GraphQL context is not available');
+        }
+
+        return this.#context as ExecutionContext;
+    }
+
     getClass (): any {
-        return this.#context.getClass();
+        return this.#transport.getClass();
     }
 
     getHandler (): any {
-        return this.#context.getHandler();
+        return this.#transport.getHandler();
+    }
+
+    getRequestLike (): unknown {
+        return this.#transport.getRequestLike();
     }
 
     addData<T> (key: string, data: T): void {
-        if (this.#isSocket) {
-            (this.#context as Context).addData(key, data);
-        } else {
-            const request = (this.#context as ExecutionContext).switchToHttp().getRequest();
-
-            if (request) {
-                request[key] = data;
-            } else {
-                this.#data[key] = data;
-            }
-        }
+        this.#transport.setData(key, data);
     }
 
     getData<T> (key: string): T | null {
-        if (this.#isSocket) {
-            return (this.#context as Context).getData(key) as T | null;
-        }
-
-        const request = (this.#context as ExecutionContext).switchToHttp().getRequest();
-
-        if (request && request[key]) {
-            return request[key] as T;
-        }
-
-        return (this.#data[key] as T) ?? null;
+        return this.#transport.getData(key);
     }
 }

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { HttpException, Injectable } from '@nestjs/common';
 import { Context, CanActivate } from '@eleven-am/pondsocket-nest';
 
 import { AuthorizationService } from './authorization/authorization.service';
@@ -7,7 +7,15 @@ import { AuthorizationService } from './authorization/authorization.service';
 export class AuthorizationSocketGuard implements CanActivate {
     constructor (private readonly authorizationService: AuthorizationService) {}
 
-    canActivate (context: Context): Promise<boolean> {
-        return this.authorizationService.authorize(context);
+    async canActivate (context: Context): Promise<boolean> {
+        try {
+            return await this.authorizationService.authorize(context);
+        } catch (error) {
+            if (error instanceof HttpException) {
+                return false;
+            }
+
+            throw error;
+        }
     }
 }

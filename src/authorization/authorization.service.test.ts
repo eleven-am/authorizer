@@ -1,15 +1,16 @@
 import 'reflect-metadata';
-import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { AbilityBuilder, createMongoAbility } from '@casl/ability';
 
-import { ABILITY_CONTEXT_KEY, USER_CONTEXT_KEY, AUTHORIZER_KEY, CAN_PERFORM_KEY } from './authorization.constants';
+import { ABILITY_CONTEXT_KEY, USER_CONTEXT_KEY, SUBJECTS_CONTEXT_KEY, AUTHORIZER_KEY, AUTHORIZER_SUBJECT_KEY, CAN_PERFORM_KEY, PUBLIC_KEY } from './authorization.constants';
+import { AuthorizationContext } from './authorization.context';
 import { AuthorizationService } from './authorization.service';
 
 describe('AuthorizationService', () => {
     let service: AuthorizationService;
     let mockDiscovery: { getProviders: jest.Mock };
     let mockReflector: { get: jest.Mock };
-    let mockAuthenticator: { retrieveUser: jest.Mock; abilityFactory: jest.Mock };
+    let mockAuthenticator: { retrieveUser: jest.Mock, abilityFactory: jest.Mock };
     let mockRequest: Record<string, any>;
     let mockContext: {
         getClass: jest.Mock;
@@ -53,7 +54,9 @@ describe('AuthorizationService', () => {
 
         mockDiscovery.getProviders.mockReturnValue(providers);
         mockReflector.get.mockImplementation((key: symbol) => {
-            if (key === AUTHORIZER_KEY) return true;
+            if (key === AUTHORIZER_KEY) {
+                return true;
+            }
 
             return null;
         });
@@ -61,10 +64,19 @@ describe('AuthorizationService', () => {
         mockReflector.get.mockReset();
     }
 
-    function setupPermissions (classPerms: any[] | null, handlerPerms: any[] | null) {
+    function setupPermissions (classPerms: any[] | null, handlerPerms: any[] | null, publicTargets: any[] = []) {
         mockReflector.get.mockImplementation((key: symbol, target: any) => {
-            if (key === CAN_PERFORM_KEY && target === testClass) return classPerms;
-            if (key === CAN_PERFORM_KEY && target === testHandler) return handlerPerms;
+            if (key === CAN_PERFORM_KEY && target === testClass) {
+                return classPerms;
+            }
+
+            if (key === CAN_PERFORM_KEY && target === testHandler) {
+                return handlerPerms;
+            }
+
+            if (key === PUBLIC_KEY && publicTargets.includes(target)) {
+                return true;
+            }
 
             return null;
         });
@@ -73,7 +85,9 @@ describe('AuthorizationService', () => {
     function createAuthorizer (grantFn?: (builder: AbilityBuilder<any>) => void) {
         return {
             forUser: jest.fn().mockImplementation((_user: any, builder: any) => {
-                if (grantFn) grantFn(builder);
+                if (grantFn) {
+                    grantFn(builder);
+                }
             }),
         };
     }
@@ -94,14 +108,50 @@ describe('AuthorizationService', () => {
             expect(mockReflector.get).toHaveBeenCalledWith(AUTHORIZER_KEY, metatype);
         });
 
-        it('filters out providers without metatype', () => {
+        it('discovers authorizers registered via custom providers through instance.constructor', async () => {
+            class CustomAuthorizer {
+                forUser = jest.fn();
+            }
+
+            const instance = new CustomAuthorizer();
+
             mockDiscovery.getProviders.mockReturnValue([
-                { metatype: null, instance: { forUser: jest.fn() } },
+                { metatype: null, instance },
             ]);
+            mockReflector.get.mockImplementation(
+                (key: symbol, target: any) => (key === AUTHORIZER_KEY && target === CustomAuthorizer ? true : null),
+            );
 
             service.onModuleInit();
+            mockReflector.get.mockReset();
 
-            expect(mockReflector.get).not.toHaveBeenCalled();
+            setupPermissions(null, null);
+            mockAuthenticator.abilityFactory.mockReturnValue(new AbilityBuilder(createMongoAbility));
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            await service.authorize(mockContext as any);
+
+            expect(instance.forUser).toHaveBeenCalled();
+        });
+
+        it('excludes providers without authorizer metadata on metatype or constructor', async () => {
+            const instance = { forUser: jest.fn() };
+
+            mockDiscovery.getProviders.mockReturnValue([
+                { metatype: null, instance },
+            ]);
+            mockReflector.get.mockReturnValue(null);
+
+            service.onModuleInit();
+            mockReflector.get.mockReset();
+
+            setupPermissions(null, null);
+            mockAuthenticator.abilityFactory.mockReturnValue(new AbilityBuilder(createMongoAbility));
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            await service.authorize(mockContext as any);
+
+            expect(instance.forUser).not.toHaveBeenCalled();
         });
 
         it('filters out providers without instance', () => {
@@ -193,14 +243,120 @@ describe('AuthorizationService', () => {
             );
         });
 
-        it('returns true when no user and no permissions (public route)', async () => {
+        it('throws UnauthorizedException when no user and route is not public', async () => {
             service.onModuleInit();
             setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+            await expect(service.authorize(mockContext as any)).rejects.toThrow(
+                UnauthorizedException,
+            );
+        });
+
+        it('returns true when no user and handler is decorated with Public', async () => {
+            service.onModuleInit();
+            setupPermissions(null, null, [testHandler]);
             mockAuthenticator.retrieveUser.mockResolvedValue(null);
 
             const result = await service.authorize(mockContext as any);
 
             expect(result).toBe(true);
+        });
+
+        it('returns true when no user and class is decorated with Public', async () => {
+            service.onModuleInit();
+            setupPermissions(null, null, [testClass]);
+            mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+        });
+
+        it('throws UnauthorizedException when no user on a Public route with permissions', async () => {
+            service.onModuleInit();
+            setupPermissions(null, [{ action: 'read', subject: 'Post' }], [testHandler]);
+            mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+            await expect(service.authorize(mockContext as any)).rejects.toThrow(
+                UnauthorizedException,
+            );
+        });
+
+        it('returns true when no user and defaultPolicy is public', async () => {
+            const permissiveService = new AuthorizationService(
+                mockDiscovery as any,
+                mockReflector as any,
+                mockAuthenticator as any,
+                { defaultPolicy: 'public' },
+            );
+
+            permissiveService.onModuleInit();
+            setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+            const result = await permissiveService.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+        });
+
+        it('still enforces permissions when defaultPolicy is public', async () => {
+            const permissiveService = new AuthorizationService(
+                mockDiscovery as any,
+                mockReflector as any,
+                mockAuthenticator as any,
+                { defaultPolicy: 'public' },
+            );
+
+            permissiveService.onModuleInit();
+            setupPermissions(null, [{ action: 'read', subject: 'Post' }]);
+            mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+            await expect(permissiveService.authorize(mockContext as any)).rejects.toThrow(
+                UnauthorizedException,
+            );
+        });
+
+        it('exempts Public handlers from class-level permissions', async () => {
+            service.onModuleInit();
+            setupPermissions([{ action: 'read', subject: 'Post' }], null, [testHandler]);
+            mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+        });
+
+        it('allows anonymous access to Public routes when retrieveUser throws', async () => {
+            service.onModuleInit();
+            setupPermissions(null, null, [testHandler]);
+            mockAuthenticator.retrieveUser.mockRejectedValue(new Error('bad token'));
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+        });
+
+        it('propagates retrieveUser failures on protected routes', async () => {
+            service.onModuleInit();
+            setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockRejectedValue(new Error('bad token'));
+
+            await expect(service.authorize(mockContext as any)).rejects.toThrow('bad token');
+        });
+
+        it('checks permissions for authenticated users on Public routes', async () => {
+            const authorizer = createAuthorizer((builder) => {
+                builder.can('read', 'Post');
+            });
+
+            setupAuthorizers([authorizer]);
+            setupPermissions(null, [{ action: 'delete', subject: 'Post' }], [testHandler]);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            await expect(service.authorize(mockContext as any)).rejects.toThrow(
+                ForbiddenException,
+            );
         });
 
         it('merges class and handler permissions', async () => {
@@ -287,8 +443,10 @@ describe('AuthorizationService', () => {
         it('supports async forUser in authorizers', async () => {
             const authorizer = {
                 forUser: jest.fn().mockImplementation(
-                    async (_user: any, builder: any) => {
+                    (_user: any, builder: any) => {
                         builder.can('read', 'Post');
+
+                        return Promise.resolve();
                     },
                 ),
             };
@@ -377,6 +535,237 @@ describe('AuthorizationService', () => {
             } catch (error) {
                 expect(error).toBeInstanceOf(ForbiddenException);
             }
+        });
+    });
+
+    describe('subject resolution', () => {
+        beforeEach(() => {
+            mockAuthenticator.abilityFactory.mockReturnValue(
+                new AbilityBuilder(createMongoAbility),
+            );
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+        });
+
+        function setupSubjectAuthorizers (entries: Array<{ instance: any, subject?: string }>) {
+            const metatypes = entries.map(() => class {});
+
+            mockDiscovery.getProviders.mockReturnValue(
+                entries.map(({ instance }, index) => ({ metatype: metatypes[index], instance })),
+            );
+            mockReflector.get.mockImplementation((key: symbol, target: any) => {
+                const index = metatypes.indexOf(target);
+
+                if (index === -1) {
+                    return null;
+                }
+
+                if (key === AUTHORIZER_KEY) {
+                    return true;
+                }
+
+                if (key === AUTHORIZER_SUBJECT_KEY) {
+                    return entries[index].subject ?? null;
+                }
+
+                return null;
+            });
+            service.onModuleInit();
+            mockReflector.get.mockReset();
+        }
+
+        function createScopedAuthorizer (grantFn: (builder: AbilityBuilder<any>) => void, entity: unknown) {
+            return {
+                forUser: jest.fn().mockImplementation((_user: any, builder: any) => grantFn(builder)),
+                resolveSubject: jest.fn().mockResolvedValue(entity),
+            };
+        }
+
+        it('resolves the subject, checks the instance, and stashes it', async () => {
+            const post = { id: 'p1', authorId: 1 };
+            const authorizer = createScopedAuthorizer((builder) => {
+                builder.can('update', 'Post', { authorId: 1 });
+            }, post);
+
+            setupSubjectAuthorizers([{ instance: authorizer, subject: 'Post' }]);
+            setupPermissions(null, [{ action: 'update', subject: 'Post' }]);
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+            expect(authorizer.resolveSubject).toHaveBeenCalled();
+            expect(mockRequest[SUBJECTS_CONTEXT_KEY]).toEqual({ Post: post });
+        });
+
+        it('throws ForbiddenException when the instance check fails', async () => {
+            const authorizer = createScopedAuthorizer((builder) => {
+                builder.can('update', 'Post', { authorId: 1 });
+            }, { id: 'p1', authorId: 99 });
+
+            setupSubjectAuthorizers([{ instance: authorizer, subject: 'Post' }]);
+            setupPermissions(null, [{ action: 'update', subject: 'Post' }]);
+
+            await expect(service.authorize(mockContext as any)).rejects.toThrow(ForbiddenException);
+        });
+
+        it('throws NotFoundException when the subject resolves to null', async () => {
+            const authorizer = createScopedAuthorizer((builder) => {
+                builder.can('update', 'Post');
+            }, null);
+
+            setupSubjectAuthorizers([{ instance: authorizer, subject: 'Post' }]);
+            setupPermissions(null, [{ action: 'update', subject: 'Post' }]);
+
+            await expect(service.authorize(mockContext as any)).rejects.toThrow(NotFoundException);
+        });
+
+        it('does not invoke resolvers for subjects not named in permissions', async () => {
+            const authorizer = createScopedAuthorizer((builder) => {
+                builder.can('read', 'Comment');
+            }, { id: 'p1' });
+
+            setupSubjectAuthorizers([{ instance: authorizer, subject: 'Post' }]);
+            setupPermissions(null, [{ action: 'read', subject: 'Comment' }]);
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+            expect(authorizer.resolveSubject).not.toHaveBeenCalled();
+        });
+
+        it('resolves multiple subjects in one request', async () => {
+            const post = { id: 'p1' };
+            const comment = { id: 'c1' };
+            const postAuthorizer = createScopedAuthorizer((builder) => {
+                builder.can('read', 'Post');
+            }, post);
+            const commentAuthorizer = createScopedAuthorizer((builder) => {
+                builder.can('update', 'Comment');
+            }, comment);
+
+            setupSubjectAuthorizers([
+                { instance: postAuthorizer, subject: 'Post' },
+                { instance: commentAuthorizer, subject: 'Comment' },
+            ]);
+            setupPermissions(null, [
+                { action: 'read', subject: 'Post' },
+                { action: 'update', subject: 'Comment' },
+            ]);
+
+            const result = await service.authorize(mockContext as any);
+
+            expect(result).toBe(true);
+            expect(mockRequest[SUBJECTS_CONTEXT_KEY]).toEqual({ Post: post, Comment: comment });
+        });
+
+        it('throws at startup when two authorizers resolve the same subject', () => {
+            const first = { forUser: jest.fn(), resolveSubject: jest.fn() };
+            const second = { forUser: jest.fn(), resolveSubject: jest.fn() };
+
+            expect(() => setupSubjectAuthorizers([
+                { instance: first, subject: 'Post' },
+                { instance: second, subject: 'Post' },
+            ])).toThrow('Multiple authorizers declare resolveSubject for the subject "Post"');
+        });
+
+        it('exposes resolved subjects to authorize hooks', async () => {
+            const post = { id: 'p1' };
+            const seen: unknown[] = [];
+            const authorizer = {
+                forUser: jest.fn().mockImplementation((_user: any, builder: any) => {
+                    builder.can('read', 'Post');
+                }),
+                resolveSubject: jest.fn().mockResolvedValue(post),
+                authorize: jest.fn().mockImplementation((context: any) => {
+                    seen.push(context.getData(SUBJECTS_CONTEXT_KEY));
+
+                    return true;
+                }),
+            };
+
+            setupSubjectAuthorizers([{ instance: authorizer, subject: 'Post' }]);
+            setupPermissions(null, [{ action: 'read', subject: 'Post' }]);
+
+            await service.authorize(mockContext as any);
+
+            expect(seen).toEqual([{ Post: post }]);
+        });
+    });
+
+    describe('getAbility', () => {
+        beforeEach(() => {
+            mockAuthenticator.abilityFactory.mockReturnValue(
+                new AbilityBuilder(createMongoAbility),
+            );
+        });
+
+        it('builds the ability and stores it with the user on the context', async () => {
+            const authorizer = createAuthorizer((builder) => {
+                builder.can('read', 'Post');
+            });
+
+            setupAuthorizers([authorizer]);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            const ability = await service.getAbility(mockContext as any);
+
+            expect(ability.can('read', 'Post')).toBe(true);
+            expect(mockRequest[ABILITY_CONTEXT_KEY]).toBe(ability);
+            expect(mockRequest[USER_CONTEXT_KEY]).toEqual({ id: 1 });
+        });
+
+        it('returns the cached ability without retrieving the user again', async () => {
+            const authorizer = createAuthorizer((builder) => {
+                builder.can('read', 'Post');
+            });
+
+            setupAuthorizers([authorizer]);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            const first = await service.getAbility(mockContext as any);
+            const second = await service.getAbility(mockContext as any);
+
+            expect(second).toBe(first);
+            expect(mockAuthenticator.retrieveUser).toHaveBeenCalledTimes(1);
+        });
+
+        it('reuses the ability stored by authorize', async () => {
+            const authorizer = createAuthorizer((builder) => {
+                builder.can('read', 'Post');
+            });
+
+            setupAuthorizers([authorizer]);
+            setupPermissions(null, null);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            await service.authorize(mockContext as any);
+
+            const ability = await service.getAbility(mockContext as any);
+
+            expect(ability).toBe(mockRequest[ABILITY_CONTEXT_KEY]);
+            expect(mockAuthenticator.retrieveUser).toHaveBeenCalledTimes(1);
+        });
+
+        it('throws UnauthorizedException when there is no user', async () => {
+            service.onModuleInit();
+            mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+            await expect(service.getAbility(mockContext as any)).rejects.toThrow(
+                UnauthorizedException,
+            );
+        });
+
+        it('accepts an AuthorizationContext instance', async () => {
+            const authorizer = createAuthorizer((builder) => {
+                builder.can('read', 'Post');
+            });
+
+            setupAuthorizers([authorizer]);
+            mockAuthenticator.retrieveUser.mockResolvedValue({ id: 1 });
+
+            const authContext = new AuthorizationContext(mockContext as any);
+            const ability = await service.getAbility(authContext);
+
+            expect(ability.can('read', 'Post')).toBe(true);
         });
     });
 });

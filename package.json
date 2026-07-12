@@ -1,41 +1,54 @@
 {
   "name": "@eleven-am/authorizer",
-  "version": "1.0.7",
+  "version": "2.0.0",
   "publishConfig": {
     "access": "public"
   },
   "author": "Roy OSSAI",
-  "main": "./index.js",
-  "types": "./index.d.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "exports": {
     ".": {
-      "types": "./index.d.ts",
-      "default": "./index.js"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./pondsocket": {
-      "types": "./pondsocket.d.ts",
-      "default": "./pondsocket.js"
+      "types": "./dist/pondsocket.d.ts",
+      "default": "./dist/pondsocket.js"
+    },
+    "./prisma": {
+      "types": "./dist/prisma.d.ts",
+      "default": "./dist/prisma.js"
     }
   },
   "license": "GPL-3.0",
   "scripts": {
     "test": "jest",
-    "build": "rimraf dist && tsc",
+    "build": "rimraf dist && tsc -p tsconfig.build.json && cp src/types.d.ts dist/index.d.ts && cp src/pondsocket.d.ts dist/pondsocket.d.ts && cp src/prisma.d.ts dist/prisma.d.ts",
     "lint": "eslint src",
     "lint:fix": "eslint --fix src",
-    "copy": "cp package.json dist && cp README.md dist && cp LICENSE dist && cp src/types.d.ts dist/index.d.ts && cp src/pondsocket.d.ts dist/pondsocket.d.ts",
-    "push": "npm version patch && npm run copy && cd dist && npm publish && cd ..",
-    "pipeline": "npm run build && npm run push"
+    "prepublishOnly": "npm run lint && npm test && npm run build",
+    "push": "npm version patch && npm publish",
+    "pipeline": "npm run push"
   },
   "peerDependencies": {
-    "@casl/ability": "^6.0.0",
+    "@casl/ability": "^7.0.0",
+    "@casl/prisma": "^2.0.0",
+    "@eleven-am/pondsocket-nest": "^0.0.138",
     "@nestjs/common": "^11.0.0",
     "@nestjs/core": "^11.0.0",
-    "@eleven-am/pondsocket-nest": "^0.0.134"
+    "@nestjs/graphql": "^13.0.0",
+    "@prisma/client": "^4.16.0 || ^5.0.0 || ^6.0.0 || ^7.0.0"
   },
   "peerDependenciesMeta": {
     "@casl/ability": {
       "optional": false
+    },
+    "@casl/prisma": {
+      "optional": true
     },
     "@nestjs/common": {
       "optional": false
@@ -43,29 +56,40 @@
     "@nestjs/core": {
       "optional": false
     },
+    "@nestjs/graphql": {
+      "optional": true
+    },
     "@eleven-am/pondsocket-nest": {
+      "optional": true
+    },
+    "@prisma/client": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@casl/ability": "^6.7.3",
-    "@eleven-am/pondsocket-nest": "^0.0.134",
-    "@nestjs/common": "^11.1.3",
-    "@nestjs/core": "^11.1.3",
-    "@stylistic/eslint-plugin": "^5.9.0",
-    "@types/express": "^5.0.3",
+    "@casl/ability": "^7.0.1",
+    "@casl/prisma": "^2.0.2",
+    "@eleven-am/pondsocket-nest": "^0.0.138",
+    "@eslint/js": "^10.0.1",
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/graphql": "^13.4.2",
+    "@prisma/client": "^7.8.0",
+    "@stylistic/eslint-plugin": "^5.10.0",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
-    "eslint": "^9.28.0",
-    "eslint-config-prettier": "^10.1.5",
-    "jest": "^30.0.0",
-    "prettier": "^3.5.3",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
+    "graphql": "^16.14.2",
+    "jest": "^30.4.2",
+    "prettier": "^3.9.5",
     "reflect-metadata": "^0.2.2",
-    "rimraf": "^6.0.0",
+    "rimraf": "^6.1.3",
     "rxjs": "^7.8.2",
-    "ts-jest": "^29.3.4",
+    "ts-jest": "^29.4.11",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.3",
-    "typescript-eslint": "^8.56.1"
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.63.0"
   },
   "jest": {
     "moduleFileExtensions": [

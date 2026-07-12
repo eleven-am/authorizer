@@ -1,7 +1,8 @@
 import 'reflect-metadata';
 import { AbilityBuilder, createMongoAbility } from '@casl/ability';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 
-import { ABILITY_CONTEXT_KEY, USER_CONTEXT_KEY } from './authorization/authorization.constants';
+import { ABILITY_CONTEXT_KEY, USER_CONTEXT_KEY, PUBLIC_KEY } from './authorization/authorization.constants';
 import { AuthorizationContext } from './authorization/authorization.context';
 import { AuthorizationService } from './authorization/authorization.service';
 import { AuthorizationSocketGuard } from './pondsocket';
@@ -26,7 +27,19 @@ describe('AuthorizationSocketGuard', () => {
         expect(mockService.authorize).toHaveBeenCalledWith(mockContext);
     });
 
-    it('propagates rejections', async () => {
+    it('returns false when authorization throws UnauthorizedException', async () => {
+        mockService.authorize.mockRejectedValue(new UnauthorizedException('Authentication required'));
+
+        await expect(guard.canActivate({} as any)).resolves.toBe(false);
+    });
+
+    it('returns false when authorization throws ForbiddenException', async () => {
+        mockService.authorize.mockRejectedValue(new ForbiddenException());
+
+        await expect(guard.canActivate({} as any)).resolves.toBe(false);
+    });
+
+    it('propagates non-HTTP rejections', async () => {
         const error = new Error('forbidden');
 
         mockService.authorize.mockRejectedValue(error);
@@ -39,7 +52,7 @@ describe('AuthorizationService with PondSocket context', () => {
     let service: AuthorizationService;
     let mockDiscovery: { getProviders: jest.Mock };
     let mockReflector: { get: jest.Mock };
-    let mockAuthenticator: { retrieveUser: jest.Mock; abilityFactory: jest.Mock };
+    let mockAuthenticator: { retrieveUser: jest.Mock, abilityFactory: jest.Mock };
 
     beforeEach(() => {
         mockDiscovery = { getProviders: jest.fn().mockReturnValue([]) };
@@ -111,6 +124,38 @@ describe('AuthorizationService with PondSocket context', () => {
 
         expect(receivedArg).toBeInstanceOf(AuthorizationContext);
         expect(receivedArg.isSocket).toBe(true);
+    });
+
+    it('throws UnauthorizedException for anonymous socket contexts on non-public handlers', async () => {
+        const mockContext = {
+            getClass: jest.fn().mockReturnValue(class {}),
+            getHandler: jest.fn().mockReturnValue(() => {}),
+            addData: jest.fn(),
+            getData: jest.fn(),
+        };
+
+        mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+        await expect(service.authorize(mockContext as any)).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('allows anonymous socket contexts on Public handlers', async () => {
+        const handler = () => {};
+
+        mockReflector.get.mockImplementation(
+            (key: symbol, target: any) => (key === PUBLIC_KEY && target === handler ? true : null),
+        );
+
+        const mockContext = {
+            getClass: jest.fn().mockReturnValue(class {}),
+            getHandler: jest.fn().mockReturnValue(handler),
+            addData: jest.fn(),
+            getData: jest.fn(),
+        };
+
+        mockAuthenticator.retrieveUser.mockResolvedValue(null);
+
+        await expect(service.authorize(mockContext as any)).resolves.toBe(true);
     });
 
     it('stores ability via request for HTTP context', async () => {

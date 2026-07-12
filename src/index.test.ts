@@ -10,6 +10,7 @@ import {
     CurrentAbility,
     CurrentUser,
     createParamDecorator,
+    registerTransportAdapter,
 } from './index';
 
 describe('Public API exports', () => {
@@ -21,9 +22,8 @@ describe('Public API exports', () => {
         expect(Authorizer).toBeInstanceOf(Function);
         expect(CanPerform).toBeInstanceOf(Function);
         expect(createParamDecorator).toBeInstanceOf(Function);
-        expect(CurrentAbility).toHaveProperty('HTTP');
-        expect(CurrentAbility).toHaveProperty('WS');
-        expect(CurrentUser).toHaveProperty('HTTP');
-        expect(CurrentUser).toHaveProperty('WS');
+        expect(registerTransportAdapter).toBeInstanceOf(Function);
+        expect(CurrentAbility).toBeInstanceOf(Function);
+        expect(CurrentUser).toBeInstanceOf(Function);
     });
 });
