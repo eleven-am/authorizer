@@ -768,4 +768,136 @@ describe('AuthorizationService', () => {
             expect(ability.can('read', 'Post')).toBe(true);
         });
     });
+
+    describe('ability factory resolution', () => {
+        const CLIFF = 9007199254740992;
+        const atCliff = 9007199254740992n;
+        const aboveCliff = 9007199254740993n;
+
+        function buildService (authenticator: any) {
+            return new AuthorizationService(
+                mockDiscovery as any,
+                mockReflector as any,
+                authenticator as any,
+            );
+        }
+
+        function registerAuthorizer (svc: AuthorizationService, authorizer: { forUser: jest.Mock }) {
+            mockDiscovery.getProviders.mockReturnValue([{ metatype: class {}, instance: authorizer }]);
+            mockReflector.get.mockImplementation((key: symbol) => (key === AUTHORIZER_KEY ? true : null));
+            svc.onModuleInit();
+            mockReflector.get.mockReset();
+        }
+
+        it('builds abilities with the safe prisma factory when the authenticator omits abilityFactory', async () => {
+            const authenticator = { retrieveUser: jest.fn().mockResolvedValue({ id: 1 }) };
+            const svc = buildService(authenticator);
+            const authorizer = createAuthorizer((builder) => {
+                builder.can('read', 'Account', { balance: { equals: CLIFF } });
+            });
+
+            registerAuthorizer(svc, authorizer);
+
+            const ability = await svc.getAbility(mockContext as any);
+
+            expect(ability.can('read', { __caslSubjectType__: 'Account', balance: atCliff } as never)).toBe(true);
+            expect(ability.can('read', { __caslSubjectType__: 'Account', balance: aboveCliff } as never)).toBe(false);
+        });
+
+        it('builds a fresh ability per request without accumulating rules across users', async () => {
+            const authenticator = {
+                retrieveUser: jest.fn()
+                    .mockResolvedValueOnce({ id: 1 })
+                    .mockResolvedValueOnce({ id: 2 }),
+            };
+            const svc = buildService(authenticator);
+            const authorizer = {
+                forUser: jest.fn().mockImplementation((user: any, builder: any) => {
+                    builder.can('read', 'Account', { ownerId: user.id });
+                }),
+            };
+
+            registerAuthorizer(svc, authorizer);
+
+            const contextFor = () => ({
+                getClass: jest.fn().mockReturnValue(class {}),
+                getHandler: jest.fn().mockReturnValue(() => {}),
+                switchToHttp: jest.fn().mockReturnValue({
+                    getRequest: jest.fn().mockReturnValue({}),
+                }),
+            });
+            const first = await svc.getAbility(contextFor() as any);
+            const second = await svc.getAbility(contextFor() as any);
+
+            expect(second).not.toBe(first);
+            expect(second.rules).toHaveLength(first.rules.length);
+            expect(first.can('read', { __caslSubjectType__: 'Account', ownerId: 1 } as never)).toBe(true);
+            expect(second.can('read', { __caslSubjectType__: 'Account', ownerId: 2 } as never)).toBe(true);
+            expect(second.can('read', { __caslSubjectType__: 'Account', ownerId: 1 } as never)).toBe(false);
+        });
+
+        it('uses the authenticator abilityFactory when it is provided', async () => {
+            const factory = jest.fn(() => new AbilityBuilder(createMongoAbility));
+            const authenticator = {
+                retrieveUser: jest.fn().mockResolvedValue({ id: 1 }),
+                abilityFactory: factory,
+            };
+            const svc = buildService(authenticator);
+            const authorizer = createAuthorizer((builder) => {
+                builder.can('read', 'Post');
+            });
+
+            registerAuthorizer(svc, authorizer);
+
+            const ability = await svc.getAbility(mockContext as any);
+
+            expect(factory).toHaveBeenCalled();
+            expect(ability.can('read', 'Post')).toBe(true);
+            expect(ability.can('read', 'Comment')).toBe(false);
+        });
+
+        it('resolvedAbilityFactory returns the authenticator factory when present', () => {
+            const factory = jest.fn(() => new AbilityBuilder(createMongoAbility));
+            const authenticator = { retrieveUser: jest.fn(), abilityFactory: factory };
+            const svc = buildService(authenticator);
+
+            svc.resolvedAbilityFactory()();
+
+            expect(factory).toHaveBeenCalledTimes(1);
+        });
+
+        it('resolvedAbilityFactory falls back to the cached safe default when absent', () => {
+            const authenticator = { retrieveUser: jest.fn() };
+            const svc = buildService(authenticator);
+
+            const first = svc.resolvedAbilityFactory();
+            const second = svc.resolvedAbilityFactory();
+
+            expect(second).toBe(first);
+
+            const { can, build } = first();
+
+            can('read', 'Account', { balance: { equals: CLIFF } });
+
+            const ability = build();
+
+            expect(ability.can('read', { __caslSubjectType__: 'Account', balance: atCliff } as never)).toBe(true);
+            expect(ability.can('read', { __caslSubjectType__: 'Account', balance: aboveCliff } as never)).toBe(false);
+        });
+
+        it('throws a clear error when the default factory cannot be loaded', () => {
+            jest.isolateModules(() => {
+                jest.doMock('../prisma', () => {
+                    throw new Error('Cannot find module @casl/prisma');
+                });
+
+                const { AuthorizationService: IsolatedService } = require('./authorization.service');
+                const svc = new IsolatedService(mockDiscovery, mockReflector, { retrieveUser: jest.fn() });
+
+                expect(() => svc.resolvedAbilityFactory()).toThrow('install @casl/prisma');
+            });
+
+            jest.dontMock('../prisma');
+        });
+    });
 });

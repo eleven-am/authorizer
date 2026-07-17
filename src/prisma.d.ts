@@ -13,4 +13,4 @@ export declare class PrismaAuthorizationService {
 
 export declare function bigintSafePrismaQuery (conditions: Record<string, unknown>): MatchConditions;
 
-export declare function createBigIntSafePrismaAbility<A extends AbilityTuple = [string, string], C = Record<string, unknown>> (rules?: RawRuleFrom<A, C>[], options?: AbilityOptions<A, C>): Ability<A, C>;
+export declare function createAbility<A extends AbilityTuple = [string, string], C = Record<string, unknown>> (rules?: RawRuleFrom<A, C>[], options?: AbilityOptions<A, C>): Ability<A, C>;

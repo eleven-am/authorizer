@@ -197,12 +197,12 @@ export class AppModule {}
 ```typescript
 interface Authenticator {
     retrieveUser(context: AuthorizationContext): Promise<ResolvedUser | null>;
-    abilityFactory(): AbilityBuilder<ResolvedAbility>;
+    abilityFactory?(): AbilityBuilder<ResolvedAbility>;
 }
 ```
 
 - `retrieveUser` — extract the current user from the request context. Return `null` for unauthenticated requests.
-- `abilityFactory` — return a fresh `AbilityBuilder` that authorizers will populate with rules.
+- `abilityFactory` — optional. Return a fresh `AbilityBuilder` that authorizers will populate with rules. Omit it and the library defaults to `new AbilityBuilder(createAbility)`, the BigInt-safe Prisma factory from `@eleven-am/authorizer/prisma` (loaded lazily, so main-entry consumers that never hit this default do not need `@casl/prisma`). Supply your own only when you need a different ability flavor.
 
 `retrieveUser` receives an `AuthorizationContext`. Use `context.getRequestLike()` for a transport-agnostic view of the request (HTTP request object, GraphQL request object, or the PondSocket `Context`), or branch on `context.type` / `context.isHttp` / `context.isSocket` when you need the typed underlying context via `getHttpContext()` / `getGraphQLContext()` / `getSocketContext()`.
 
@@ -487,14 +487,14 @@ const ability = await this.authorizationService.getAbility(context);
 
 `@casl/prisma`'s default matcher compares condition values with `a === b`, so an in-memory `ability.can(...)` check on a `BigInt` column always returns the wrong answer once a value passes `2^53`: `9007199254740992n === 9007199254740992` is `false`, and coercing the row value to `Number` to work around it silently loses precision above the same cliff. `constrain` is unaffected — it pushes conditions to the database — but any gate check (`authorize`, `@CanPerform`, `ability.can`) that evaluates a `BigInt` field in memory is.
 
-The `./prisma` subpath exports a drop-in matcher that compares exactly. `bigintSafePrismaQuery` parses the same Prisma condition syntax (reusing `@casl/prisma`'s parser, so `where`-clause generation is unchanged) but evaluates it with JavaScript's spec-exact `<`/`>`/`==` semantics for mixed `BigInt`/`Number` operands. `createBigIntSafePrismaAbility` is a drop-in replacement for `createPrismaAbility` that wires the safe matcher in. Reach for them when you have `BigInt` columns *and* perform in-memory checks; if you only ever call `constrain`, the default flavor is fine.
+The `./prisma` subpath exports a matcher that compares exactly. `bigintSafePrismaQuery` parses the same Prisma condition syntax (reusing `@casl/prisma`'s parser, so `where`-clause generation is unchanged) but evaluates it with JavaScript's spec-exact `<`/`>`/`==` semantics for mixed `BigInt`/`Number` operands. `createAbility` wires that safe matcher into an ability and is the factory the library uses by default when an `Authenticator` omits `abilityFactory`. Reach for it explicitly only when you supply your own `abilityFactory` and want the safe behavior; if you only ever call `constrain`, `createPrismaAbility` is fine.
 
-Swap it in with a one-line change to your `abilityFactory`:
+The default requires nothing — omit `abilityFactory` and every ability is built with `createAbility`. To wire it explicitly (for example, alongside a custom builder configuration), it is a one-line change to your `abilityFactory`:
 
 ```typescript
-import { createBigIntSafePrismaAbility } from '@eleven-am/authorizer/prisma';
+import { createAbility } from '@eleven-am/authorizer/prisma';
 
-abilityFactory: () => new AbilityBuilder<AppAbility>(createBigIntSafePrismaAbility),
+abilityFactory: () => new AbilityBuilder<AppAbility>(createAbility),
 ```
 
 Rule and condition syntax is identical to the Prisma flavor, so nothing else changes. Note that `@casl/prisma`'s parser accepts a `BigInt` on an `equals` condition but rejects one on relational operators (`gt`, `gte`, `lt`, `lte`) — write those bounds as `Number` literals; the exact comparison happens against the row value regardless. One remaining gap: the scalar-list operators `has`/`hasSome`/`hasEvery` use `Array.includes` (SameValueZero, identical to `@casl/prisma`'s default), so a `Number` literal still mis-compares against a `BigInt` list element across the cliff — use `BigInt` literals in those conditions to match `BigInt` list elements exactly. Scalar `in` is covered by the exact comparison.
@@ -543,19 +543,25 @@ Rule and condition syntax is identical to the Prisma flavor, so nothing else cha
 - `AuthorizationService`
   - `authorize(context)` — used internally by the guards
   - `getAbility(context)` — resolve (and cache) the ability for a request; throws 401 when unauthenticated
+  - `resolvedAbilityFactory()` — the effective ability factory: the `Authenticator`'s own `abilityFactory` (bound to it) when present, otherwise the lazily loaded, cached `createAbility` default
 - `PrismaAuthorizationService` (from `@eleven-am/authorizer/prisma`)
   - `authorize(action, model, context)` — gate check
   - `constrain(action, model, context)` — Prisma `where` clause
 - `bigintSafePrismaQuery(conditions)` (from `@eleven-am/authorizer/prisma`) — a CASL `conditionsMatcher` that evaluates Prisma-syntax conditions with exact `BigInt`/`Number` comparison
-- `createBigIntSafePrismaAbility(rules?, options?)` (from `@eleven-am/authorizer/prisma`) — drop-in replacement for `createPrismaAbility` that uses the exact matcher
+- `createAbility(rules?, options?)` (from `@eleven-am/authorizer/prisma`) — builds a Prisma ability that uses the exact matcher; the default factory when an `Authenticator` omits `abilityFactory`
 
 ### Interfaces
 
-- `Authenticator` — `retrieveUser(context)` and `abilityFactory()`
+- `Authenticator` — `retrieveUser(context)` and optional `abilityFactory()`
 - `WillAuthorize` — `forUser(user, builder)` and optional `authorize(context, ability, permissions)`
 - `Permission` — `{ action, subject, field? }`
 - `Register` — augment to type `user` and `ability`
 - `AuthorizationAsyncModuleOptions` — `{ imports?, inject?, useFactory }`
+
+## Migrating to 2.2.0
+
+- **`createBigIntSafePrismaAbility` is renamed to `createAbility`.** The old name is removed with no alias. Update imports from `@eleven-am/authorizer/prisma`: `import { createAbility } from '@eleven-am/authorizer/prisma'`. `bigintSafePrismaQuery` keeps its name.
+- **`abilityFactory` is now optional on `Authenticator`.** When omitted, the library builds every ability with `createAbility` (the BigInt-safe Prisma factory), loaded lazily so main-entry consumers that never rely on the default do not need `@casl/prisma`. If your `abilityFactory` only wrapped `createPrismaAbility`/`createAbility` in an `AbilityBuilder`, delete it and inherit the default. Keep it only to select a different ability flavor (for example `createMongoAbility`).
 
 ## Migrating from 1.x
 

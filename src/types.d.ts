@@ -91,7 +91,7 @@ export interface WillAuthorize<TSubject = unknown> {
 
 export interface Authenticator {
     retrieveUser(context: AuthorizationContext): Promise<ResolvedUser | null>;
-    abilityFactory(): AbilityBuilder<ResolvedAbility>;
+    abilityFactory?(): AbilityBuilder<ResolvedAbility>;
 }
 
 export interface AuthorizationAsyncModuleOptions {
@@ -133,6 +133,8 @@ export declare class AuthorizationService {
     authorize (context: ExecutionContext | PondSocketContextLike): Promise<boolean>;
 
     getAbility (context: ExecutionContext | PondSocketContextLike | AuthorizationContext): Promise<ResolvedAbility>;
+
+    resolvedAbilityFactory (): () => AbilityBuilder<ResolvedAbility>;
 }
 
 export declare class AuthorizationGuard implements CanActivate {

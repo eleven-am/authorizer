@@ -135,7 +135,7 @@ export const bigintSafePrismaQuery = (conditions: Record<string, unknown>): Matc
     return matcher as unknown as MatchConditions;
 };
 
-export function createBigIntSafePrismaAbility<A extends AbilityTuple = [string, string], C = Record<string, unknown>> (rules: RawRuleFrom<A, C>[] = [], options: AbilityOptions<A, C> = {}): Ability<A, C> {
+export function createAbility<A extends AbilityTuple = [string, string], C = Record<string, unknown>> (rules: RawRuleFrom<A, C>[] = [], options: AbilityOptions<A, C> = {}): Ability<A, C> {
     return new Ability<A, C>(rules, {
         ...options,
         conditionsMatcher: bigintSafePrismaQuery as unknown as ConditionsMatcher<C>,

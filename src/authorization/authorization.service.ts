@@ -1,5 +1,5 @@
 import type { Context } from '@eleven-am/pondsocket-nest';
-import { ForbiddenError, subject as caslSubject } from '@casl/ability';
+import { AbilityBuilder, ForbiddenError, subject as caslSubject } from '@casl/ability';
 import {
     Injectable,
     OnModuleInit,
@@ -21,6 +21,8 @@ export class AuthorizationService implements OnModuleInit {
     private authorizers: WillAuthorize[] = [];
 
     private subjectResolvers = new Map<string, WillAuthorize>();
+
+    private defaultAbilityFactory?: () => AbilityBuilder<ResolvedAbility>;
 
     constructor (
         private readonly discoveryService: DiscoveryService,
@@ -201,8 +203,32 @@ export class AuthorizationService implements OnModuleInit {
         return [...classPermissions, ...handlerPermissions];
     }
 
+    resolvedAbilityFactory (): () => AbilityBuilder<ResolvedAbility> {
+        if (this.authenticator.abilityFactory) {
+            return this.authenticator.abilityFactory.bind(this.authenticator);
+        }
+
+        return this.loadDefaultAbilityFactory();
+    }
+
+    private loadDefaultAbilityFactory (): () => AbilityBuilder<ResolvedAbility> {
+        if (!this.defaultAbilityFactory) {
+            let createAbility: (...args: any[]) => any;
+
+            try {
+                createAbility = require('../prisma').createAbility;
+            } catch (error) {
+                throw new Error('Cannot resolve an ability factory: provide abilityFactory() on your Authenticator or install @casl/prisma to use the default createAbility factory', { cause: error });
+            }
+
+            this.defaultAbilityFactory = () => new AbilityBuilder<ResolvedAbility>(createAbility);
+        }
+
+        return this.defaultAbilityFactory;
+    }
+
     private async buildAbility (user: ResolvedUser): Promise<ResolvedAbility> {
-        const builder = this.authenticator.abilityFactory();
+        const builder = this.resolvedAbilityFactory()();
 
         for (const authorizer of this.authorizers) {
             await authorizer.forUser(user, builder);

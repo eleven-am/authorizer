@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { AbilityBuilder } from '@casl/ability';
 import { createPrismaAbility, prismaQuery } from '@casl/prisma';
 
-import { bigintSafePrismaQuery, createBigIntSafePrismaAbility } from './prisma';
+import { bigintSafePrismaQuery, createAbility } from './prisma';
 
 const CLIFF = 9007199254740992;
 const belowCliff = 9007199254740991n;
@@ -116,9 +116,9 @@ describe('bigintSafePrismaQuery parity with prismaQuery for non-bigint condition
     });
 });
 
-describe('createBigIntSafePrismaAbility integration', () => {
+describe('createAbility integration', () => {
     it('honours can rules conditioned on bigint fields exactly at the cliff', () => {
-        const { can, build } = new AbilityBuilder(createBigIntSafePrismaAbility);
+        const { can, build } = new AbilityBuilder(createAbility);
 
         can('read', 'Account', { balance: { gte: CLIFF } });
 
@@ -130,7 +130,7 @@ describe('createBigIntSafePrismaAbility integration', () => {
     });
 
     it('applies inverted cannot rules exactly at the cliff', () => {
-        const { can, cannot, build } = new AbilityBuilder(createBigIntSafePrismaAbility);
+        const { can, cannot, build } = new AbilityBuilder(createAbility);
 
         can('read', 'Account');
         cannot('read', 'Account', { balance: { equals: atCliff } });
@@ -143,7 +143,7 @@ describe('createBigIntSafePrismaAbility integration', () => {
     });
 
     it('honours field-level rules conditioned on bigint fields', () => {
-        const { can, build } = new AbilityBuilder(createBigIntSafePrismaAbility);
+        const { can, build } = new AbilityBuilder(createAbility);
 
         can('read', 'Account', ['balance'], { balance: { equals: atCliff } });
 
@@ -154,7 +154,7 @@ describe('createBigIntSafePrismaAbility integration', () => {
     });
 
     it('is exact where the default prisma ability is wrong at the cliff', () => {
-        const safeBuilder = new AbilityBuilder(createBigIntSafePrismaAbility);
+        const safeBuilder = new AbilityBuilder(createAbility);
         const defaultBuilder = new AbilityBuilder(createPrismaAbility);
 
         safeBuilder.can('read', 'Account', { balance: { equals: CLIFF } });

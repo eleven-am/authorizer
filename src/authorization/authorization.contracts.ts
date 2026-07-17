@@ -41,7 +41,7 @@ export interface WillAuthorize<TSubject = unknown> {
 
 export interface Authenticator {
     retrieveUser(context: AuthorizationContext): Promise<ResolvedUser | null>;
-    abilityFactory(): AbilityBuilder<ResolvedAbility>;
+    abilityFactory?(): AbilityBuilder<ResolvedAbility>;
 }
 
 export interface AuthorizationAsyncModuleOptions {
