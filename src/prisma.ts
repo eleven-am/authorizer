@@ -64,6 +64,19 @@ const bigintSafeCompare = (left: unknown, right: unknown): number => {
     return baseCompare(a, b);
 };
 
+const listIncludes = (list: unknown[], value: unknown): boolean => {
+    if (list.includes(value)) {
+        return true;
+    }
+
+    return list.some((element) => {
+        const a = unwrap(element);
+        const b = unwrap(value);
+
+        return isNumeric(a) && isNumeric(b) && bigintSafeCompare(element, value) === 0;
+    });
+};
+
 const operators: Record<string, JsInterpreter<any>> = {
     equals: eq,
     notEquals: ne,
@@ -86,17 +99,17 @@ const operators: Record<string, JsInterpreter<any>> = {
     has: (condition, object, { get }) => {
         const value = get(object, condition.field);
 
-        return Array.isArray(value) && value.includes(condition.value);
+        return Array.isArray(value) && listIncludes(value, condition.value);
     },
     hasSome: (condition, object, { get }) => {
         const value = get(object, condition.field);
 
-        return Array.isArray(value) && condition.value.some((item: unknown) => value.includes(item));
+        return Array.isArray(value) && condition.value.some((item: unknown) => listIncludes(value, item));
     },
     hasEvery: (condition, object, { get }) => {
         const value = get(object, condition.field);
 
-        return Array.isArray(value) && condition.value.every((item: unknown) => value.includes(item));
+        return Array.isArray(value) && condition.value.every((item: unknown) => listIncludes(value, item));
     },
     and,
     or,

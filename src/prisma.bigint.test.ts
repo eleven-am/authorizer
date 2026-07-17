@@ -73,6 +73,44 @@ describe('bigintSafePrismaQuery cliff exactness', () => {
     });
 });
 
+describe('bigintSafePrismaQuery list membership cliff exactness', () => {
+    it('matches a number has rule against a bigint list element and beats the default', () => {
+        expect(safeVerdict({ v: { has: CLIFF } }, [atCliff])).toBe(true);
+        expect(defaultVerdict({ v: { has: CLIFF } }, [atCliff])).toBe(false);
+    });
+
+    it('matches a bigint has rule against a number list element and beats the default', () => {
+        expect(safeVerdict({ v: { has: atCliff } }, [CLIFF])).toBe(true);
+        expect(defaultVerdict({ v: { has: atCliff } }, [CLIFF])).toBe(false);
+    });
+
+    it('does not match across the cliff when the values differ by one', () => {
+        expect(safeVerdict({ v: { has: CLIFF } }, [aboveCliff])).toBe(false);
+        expect(safeVerdict({ v: { has: atCliff } }, [aboveCliff])).toBe(false);
+        expect(safeVerdict({ v: { has: aboveCliff } }, [atCliff])).toBe(false);
+    });
+
+    it('resolves hasSome exactly at the cliff and beats the default', () => {
+        expect(safeVerdict({ v: { hasSome: [CLIFF] } }, [atCliff, aboveCliff])).toBe(true);
+        expect(defaultVerdict({ v: { hasSome: [CLIFF] } }, [atCliff, aboveCliff])).toBe(false);
+        expect(safeVerdict({ v: { hasSome: [CLIFF] } }, [aboveCliff])).toBe(false);
+    });
+
+    it('resolves hasEvery exactly at the cliff and beats the default', () => {
+        expect(safeVerdict({ v: { hasEvery: [CLIFF, atCliff] } }, [atCliff])).toBe(true);
+        expect(defaultVerdict({ v: { hasEvery: [CLIFF, atCliff] } }, [atCliff])).toBe(false);
+        expect(safeVerdict({ v: { hasEvery: [CLIFF, aboveCliff] } }, [atCliff])).toBe(false);
+    });
+
+    it('fails closed when a numeric has rule meets a string list element, matching the default', () => {
+        expect(safeVerdict({ v: { has: 100 } }, ['100'])).toBe(false);
+        expect(safeVerdict({ v: { has: 100 } }, ['100'])).toBe(defaultVerdict({ v: { has: 100 } }, ['100']));
+
+        expect(safeVerdict({ v: { has: 100 } }, ['abc'])).toBe(false);
+        expect(safeVerdict({ v: { has: 100 } }, ['abc'])).toBe(defaultVerdict({ v: { has: 100 } }, ['abc']));
+    });
+});
+
 describe('bigintSafePrismaQuery parity with prismaQuery for non-bigint conditions', () => {
     const cases: { name: string, conditions: Record<string, unknown>, subjects: Record<string, unknown>[] }[] = [
         { name: 'equals number', conditions: { age: { equals: 30 } }, subjects: [{ age: 30 }, { age: 31 }] },
@@ -93,10 +131,16 @@ describe('bigintSafePrismaQuery parity with prismaQuery for non-bigint condition
         { name: 'date lt', conditions: { createdAt: { lt: new Date('2025-01-01') } }, subjects: [{ createdAt: new Date('2024-01-01') }, { createdAt: new Date('2026-01-01') }] },
         { name: 'date gte', conditions: { createdAt: { gte: new Date('2020-01-01') } }, subjects: [{ createdAt: new Date('2021-01-01') }, { createdAt: new Date('2019-01-01') }] },
         { name: 'array has', conditions: { tags: { has: 'x' } }, subjects: [{ tags: ['x', 'y'] }, { tags: ['y', 'z'] }] },
+        { name: 'array has string miss', conditions: { tags: { has: 'x' } }, subjects: [{ tags: [] }, { tags: ['xx'] }] },
+        { name: 'array has number', conditions: { scores: { has: 30 } }, subjects: [{ scores: [10, 30] }, { scores: [10, 20] }] },
+        { name: 'array has number miss across type', conditions: { scores: { has: 100 } }, subjects: [{ scores: ['100'] }, { scores: [99] }] },
         { name: 'array hasSome', conditions: { tags: { hasSome: ['x', 'q'] } }, subjects: [{ tags: ['x', 'y'] }, { tags: ['a', 'b'] }] },
+        { name: 'array hasSome numbers', conditions: { scores: { hasSome: [10, 40] } }, subjects: [{ scores: [40, 50] }, { scores: [20, 30] }] },
         { name: 'array hasEvery', conditions: { tags: { hasEvery: ['x', 'y'] } }, subjects: [{ tags: ['x', 'y', 'z'] }, { tags: ['x'] }] },
+        { name: 'array hasEvery numbers', conditions: { scores: { hasEvery: [10, 20] } }, subjects: [{ scores: [10, 20, 30] }, { scores: [10] }] },
         { name: 'array isEmpty false', conditions: { tags: { isEmpty: false } }, subjects: [{ tags: ['x'] }, { tags: [] }] },
         { name: 'array isEmpty true', conditions: { tags: { isEmpty: true } }, subjects: [{ tags: [] }, { tags: ['x'] }] },
+        { name: 'array has then isEmpty AND', conditions: { AND: [{ tags: { isEmpty: false } }, { tags: { has: 'x' } }] }, subjects: [{ tags: ['x'] }, { tags: ['y'] }, { tags: [] }] },
         { name: 'nested AND', conditions: { AND: [{ age: { gt: 10 } }, { name: { startsWith: 'A' } }] }, subjects: [{ age: 20, name: 'Alice' }, { age: 20, name: 'Bob' }] },
         { name: 'nested OR', conditions: { OR: [{ age: { lt: 5 } }, { name: { equals: 'Alice' } }] }, subjects: [{ age: 50, name: 'Alice' }, { age: 50, name: 'Bob' }] },
         { name: 'nested NOT', conditions: { NOT: { archived: { equals: true } } }, subjects: [{ archived: false }, { archived: true }] },

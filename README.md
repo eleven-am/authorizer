@@ -497,7 +497,7 @@ import { createAbility } from '@eleven-am/authorizer/prisma';
 abilityFactory: () => new AbilityBuilder<AppAbility>(createAbility),
 ```
 
-Rule and condition syntax is identical to the Prisma flavor, so nothing else changes. Note that `@casl/prisma`'s parser accepts a `BigInt` on an `equals` condition but rejects one on relational operators (`gt`, `gte`, `lt`, `lte`) — write those bounds as `Number` literals; the exact comparison happens against the row value regardless. One remaining gap: the scalar-list operators `has`/`hasSome`/`hasEvery` use `Array.includes` (SameValueZero, identical to `@casl/prisma`'s default), so a `Number` literal still mis-compares against a `BigInt` list element across the cliff — use `BigInt` literals in those conditions to match `BigInt` list elements exactly. Scalar `in` is covered by the exact comparison.
+Rule and condition syntax is identical to the Prisma flavor, so nothing else changes. Note that `@casl/prisma`'s parser accepts a `BigInt` on an `equals` condition but rejects one on relational operators (`gt`, `gte`, `lt`, `lte`) — write those bounds as `Number` literals; the exact comparison happens against the row value regardless. The scalar-list operators `has`/`hasSome`/`hasEvery` compare mixed `BigInt`/`Number` elements exactly, so a `Number` literal matches a `BigInt` list element (and vice versa) across the `2^53` cliff without either side losing precision; list elements that are not numeric keep `Array.includes` (SameValueZero) semantics, identical to `@casl/prisma`'s default. Scalar `in` is covered by the exact comparison.
 
 ## API Reference
 
@@ -562,6 +562,10 @@ Rule and condition syntax is identical to the Prisma flavor, so nothing else cha
 
 - **`createBigIntSafePrismaAbility` is renamed to `createAbility`.** The old name is removed with no alias. Update imports from `@eleven-am/authorizer/prisma`: `import { createAbility } from '@eleven-am/authorizer/prisma'`. `bigintSafePrismaQuery` keeps its name.
 - **`abilityFactory` is now optional on `Authenticator`.** When omitted, the library builds every ability with `createAbility` (the BigInt-safe Prisma factory), loaded lazily so main-entry consumers that never rely on the default do not need `@casl/prisma`. If your `abilityFactory` only wrapped `createPrismaAbility`/`createAbility` in an `AbilityBuilder`, delete it and inherit the default. Keep it only to select a different ability flavor (for example `createMongoAbility`).
+
+## Migrating to 2.2.1
+
+- **The `has`/`hasSome`/`hasEvery` scalar-list operators are now BigInt-exact.** Previously they used `Array.includes`, so a `Number` rule literal never matched a `BigInt` list element across the `2^53` cliff (and vice versa). The safe matcher now compares mixed `BigInt`/`Number` list elements exactly; non-numeric elements keep the prior `Array.includes` (SameValueZero) semantics, so only cross-type numeric membership changes verdict. No API change.
 
 ## Migrating from 1.x
 
