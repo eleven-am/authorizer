@@ -34,6 +34,9 @@
     "push": "npm version patch && npm publish",
     "pipeline": "npm run push"
   },
+  "dependencies": {
+    "@ucast/js": "^4.0.1"
+  },
   "peerDependencies": {
     "@casl/ability": "^7.0.0",
     "@casl/prisma": "^2.0.0",

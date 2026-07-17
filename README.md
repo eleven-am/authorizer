@@ -483,6 +483,22 @@ The ability can also be resolved directly from the core service:
 const ability = await this.authorizationService.getAbility(context);
 ```
 
+### BigInt-safe conditions
+
+`@casl/prisma`'s default matcher compares condition values with `a === b`, so an in-memory `ability.can(...)` check on a `BigInt` column always returns the wrong answer once a value passes `2^53`: `9007199254740992n === 9007199254740992` is `false`, and coercing the row value to `Number` to work around it silently loses precision above the same cliff. `constrain` is unaffected — it pushes conditions to the database — but any gate check (`authorize`, `@CanPerform`, `ability.can`) that evaluates a `BigInt` field in memory is.
+
+The `./prisma` subpath exports a drop-in matcher that compares exactly. `bigintSafePrismaQuery` parses the same Prisma condition syntax (reusing `@casl/prisma`'s parser, so `where`-clause generation is unchanged) but evaluates it with JavaScript's spec-exact `<`/`>`/`==` semantics for mixed `BigInt`/`Number` operands. `createBigIntSafePrismaAbility` is a drop-in replacement for `createPrismaAbility` that wires the safe matcher in. Reach for them when you have `BigInt` columns *and* perform in-memory checks; if you only ever call `constrain`, the default flavor is fine.
+
+Swap it in with a one-line change to your `abilityFactory`:
+
+```typescript
+import { createBigIntSafePrismaAbility } from '@eleven-am/authorizer/prisma';
+
+abilityFactory: () => new AbilityBuilder<AppAbility>(createBigIntSafePrismaAbility),
+```
+
+Rule and condition syntax is identical to the Prisma flavor, so nothing else changes. Note that `@casl/prisma`'s parser accepts a `BigInt` on an `equals` condition but rejects one on relational operators (`gt`, `gte`, `lt`, `lte`) — write those bounds as `Number` literals; the exact comparison happens against the row value regardless. One remaining gap: the scalar-list operators `has`/`hasSome`/`hasEvery` use `Array.includes` (SameValueZero, identical to `@casl/prisma`'s default), so a `Number` literal still mis-compares against a `BigInt` list element across the cliff — use `BigInt` literals in those conditions to match `BigInt` list elements exactly. Scalar `in` is covered by the exact comparison.
+
 ## API Reference
 
 ### Module
@@ -530,6 +546,8 @@ const ability = await this.authorizationService.getAbility(context);
 - `PrismaAuthorizationService` (from `@eleven-am/authorizer/prisma`)
   - `authorize(action, model, context)` — gate check
   - `constrain(action, model, context)` — Prisma `where` clause
+- `bigintSafePrismaQuery(conditions)` (from `@eleven-am/authorizer/prisma`) — a CASL `conditionsMatcher` that evaluates Prisma-syntax conditions with exact `BigInt`/`Number` comparison
+- `createBigIntSafePrismaAbility(rules?, options?)` (from `@eleven-am/authorizer/prisma`) — drop-in replacement for `createPrismaAbility` that uses the exact matcher
 
 ### Interfaces
 
